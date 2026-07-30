@@ -1,0 +1,10 @@
+<Solution>
+  <Configurations>
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Cemu-UWP-Host.vcxproj" Id="c40c9fa6-004d-4062-a42d-7fc4ec98deb3">
+    <Deploy />
+  </Project>
+</Solution>

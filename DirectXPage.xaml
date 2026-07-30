@@ -1,0 +1,178 @@
+<Page
+    x:Class="Cemu_UWP_Host.DirectXPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Cemu_UWP_Host"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    IsTabStop="True"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+  <Grid Background="#FF0B0B0B">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <CommandBar Grid.Row="0"
+                Background="#FF202020"
+                DefaultLabelPosition="Right"
+                IsDynamicOverflowEnabled="False">
+      <CommandBar.Content>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,20,0">
+          <TextBlock Text="Cemu" FontSize="22" FontWeight="SemiBold"
+                     VerticalAlignment="Center" Margin="0,0,12,0" />
+          <TextBlock x:Name="launchStatus"
+                     Text="Emulador inicializando..."
+                     VerticalAlignment="Center"
+                     Opacity="0.75" />
+          <StackPanel Orientation="Horizontal"
+                      VerticalAlignment="Center"
+                      Margin="24,0,0,0">
+            <FontIcon Glyph="&#xE7FC;"
+                      FontSize="14"
+                      VerticalAlignment="Center"
+                      Margin="0,0,6,0" />
+            <TextBlock x:Name="controllerStatus"
+                       Text="Controle desconectado"
+                       VerticalAlignment="Center"
+                       Foreground="DarkGray" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal"
+                      VerticalAlignment="Center"
+                      Margin="24,0,0,0">
+            <FontIcon Glyph="&#xE77B;"
+                      FontSize="14"
+                      VerticalAlignment="Center"
+                      Margin="0,0,6,0" />
+            <TextBlock x:Name="accountStatus"
+                       Text="Conta: carregando..."
+                       VerticalAlignment="Center"
+                       Opacity="0.75" />
+          </StackPanel>
+        </StackPanel>
+      </CommandBar.Content>
+      <AppBarButton x:Name="toggleTabsButton"
+                    Label="Ocultar abas"
+                    Icon="Bullets"
+                    Click="ToggleTabs_Click" />
+      <AppBarButton x:Name="startButton"
+                    Label="Iniciar jogo"
+                    Icon="Play"
+                    Click="StartGame_Click"
+                    IsEnabled="False" />
+    </CommandBar>
+
+    <!-- The emulator fills the page below the command bar. The tool tabs are
+         drawn above it and never change the SwapChainPanel's layout size. -->
+    <Grid x:Name="emulatorViewport"
+          Grid.Row="1"
+          Background="Black"
+          PointerPressed="EmulatorViewport_PointerPressed"
+          SizeChanged="EmulatorViewport_SizeChanged">
+      <SwapChainPanel x:Name="emulatorSurface"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      CompositionScaleChanged="EmulatorSurface_CompositionScaleChanged" />
+
+      <StackPanel HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  IsHitTestVisible="False">
+        <TextBlock x:Name="emulatorPlaceholder"
+                   Text="O emulador será renderizado nesta área"
+                   Opacity="0.35" />
+      </StackPanel>
+
+      <StackPanel x:Name="tabsPanel"
+                  Canvas.ZIndex="10"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Top"
+                  MaxHeight="330"
+                  Background="#B3161616">
+      <Pivot x:Name="toolTabs" Background="Transparent">
+        <PivotItem Header="Biblioteca">
+          <StackPanel Padding="24,8,24,20">
+            <TextBlock Text="Jogos instalados"
+                       FontSize="18"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,4" />
+            <TextBlock Text="Instale pastas extraídas que contenham code, content e meta. Atualizações e DLCs são associados automaticamente pelo Title ID."
+                       TextWrapping="Wrap"
+                       Opacity="0.75"
+                       Margin="0,0,0,6" />
+            <CommandBar Background="Transparent"
+                        DefaultLabelPosition="Bottom"
+                        IsDynamicOverflowEnabled="True">
+              <AppBarButton x:Name="installGameButton"
+                            Label="Instalar jogo"
+                            Icon="Add"
+                            IsEnabled="False"
+                            Click="InstallGame_Click" />
+              <AppBarButton x:Name="installUpdateButton"
+                            Label="Instalar atualização"
+                            Icon="Download"
+                            IsEnabled="False"
+                            Click="InstallUpdate_Click" />
+              <AppBarButton x:Name="installDlcButton"
+                            Label="Instalar DLC"
+                            Icon="Shop"
+                            IsEnabled="False"
+                            Click="InstallDlc_Click" />
+              <AppBarButton x:Name="refreshLibraryButton"
+                            Label="Atualizar lista"
+                            Icon="Refresh"
+                            IsEnabled="False"
+                            Click="RefreshLibrary_Click" />
+              <AppBarButton x:Name="installGraphicPacksButton"
+                            Label="Importar graphicPacks"
+                            Icon="Manage"
+                            IsEnabled="False"
+                            Click="InstallGraphicPacks_Click" />
+            </CommandBar>
+            <ListView x:Name="installedGamesList"
+                      SelectionChanged="InstalledGames_SelectionChanged"
+                      MinHeight="105"
+                      MaxHeight="155">
+              <ListView.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding}"
+                             TextWrapping="Wrap"
+                             FontFamily="Consolas"
+                             Margin="0,3,0,3" />
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+          </StackPanel>
+        </PivotItem>
+
+        <PivotItem Header="Erros">
+          <StackPanel Padding="24,8,24,20">
+            <TextBlock Text="Erros, bugs e falhas registrados nesta sessão"
+                       FontSize="16"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,4" />
+            <AppBarButton Label="Limpar erros"
+                          Icon="Delete"
+                          Click="ClearErrors_Click"
+                          HorizontalAlignment="Left" />
+            <ListView x:Name="errorsList"
+                      Margin="0,8,0,0"
+                      MinHeight="100"
+                      MaxHeight="190">
+              <ListView.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding}"
+                             TextWrapping="Wrap"
+                             FontFamily="Consolas"
+                             Foreground="Tomato" />
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+          </StackPanel>
+        </PivotItem>
+      </Pivot>
+    </StackPanel>
+    </Grid>
+  </Grid>
+</Page>
