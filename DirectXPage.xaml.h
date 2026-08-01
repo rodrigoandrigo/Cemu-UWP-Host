@@ -24,9 +24,7 @@ namespace Cemu_UWP_Host
 			Windows::Gaming::Input::RawGameController^ controller);
 		void OnRawGameControllerRemoved(Platform::Object^ sender,
 			Windows::Gaming::Input::RawGameController^ controller);
-		void InstallGame_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
-		void InstallUpdate_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
-		void InstallDlc_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void InstallContent_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void InstallGraphicPacks_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void RefreshLibrary_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void InstalledGames_SelectionChanged(Platform::Object^ sender,
@@ -45,7 +43,7 @@ namespace Cemu_UWP_Host
 		void AppendError(const std::string& message);
 		void OnCemuStateChanged(CemuEmbedState state);
 		void OnBrokeredProgress(uint64_t bytesCopied, uint64_t totalBytes, const std::string& relativePath);
-		void BeginInstall(CemuEmbedInstallType expectedType);
+		void BeginInstall();
 		void RefreshLibrary();
 		void SetLibraryActionsEnabled(bool enabled);
 		void UpdateStartButton();

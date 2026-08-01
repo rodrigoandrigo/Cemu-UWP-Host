@@ -171,19 +171,9 @@ void DirectXPage::OnRawGameControllerRemoved(Platform::Object^, RawGameControlle
 		ref new DispatchedHandler([this]() { UpdateGamepadStatus(); })));
 }
 
-void DirectXPage::InstallGame_Click(Platform::Object^, RoutedEventArgs^)
+void DirectXPage::InstallContent_Click(Platform::Object^, RoutedEventArgs^)
 {
-	BeginInstall(CEMU_EMBED_INSTALL_BASE_GAME);
-}
-
-void DirectXPage::InstallUpdate_Click(Platform::Object^, RoutedEventArgs^)
-{
-	BeginInstall(CEMU_EMBED_INSTALL_UPDATE);
-}
-
-void DirectXPage::InstallDlc_Click(Platform::Object^, RoutedEventArgs^)
-{
-	BeginInstall(CEMU_EMBED_INSTALL_DLC);
+	BeginInstall();
 }
 
 void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
@@ -229,7 +219,9 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 			SetLibraryActionsEnabled(true);
 			if (!result.first)
 			{
-				launchStatus->Text = "Falha ao importar graphic packs";
+				launchStatus->Text = "Falha ao importar graphic packs; veja a aba Erros";
+				SetTabsVisible(true);
+				toolTabs->SelectedIndex = 1;
 				UpdateStartButton();
 				return;
 			}
@@ -296,7 +288,7 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 	}, task_continuation_context::use_current());
 }
 
-void DirectXPage::BeginInstall(CemuEmbedInstallType expectedType)
+void DirectXPage::BeginInstall()
 {
 	if (!m_main || !m_cemuReady || m_libraryBusy)
 		return;
@@ -304,22 +296,18 @@ void DirectXPage::BeginInstall(CemuEmbedInstallType expectedType)
 	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
 	picker->FileTypeFilter->Append("*");
 	create_task(picker->PickSingleFolderAsync()).then(
-		[this, expectedType](StorageFolder^ folder)
+		[this](StorageFolder^ folder)
 	{
 		if (!folder) return;
 		m_libraryBusy = true;
 		SetLibraryActionsEnabled(false);
 		startButton->IsEnabled = false;
-		launchStatus->Text = expectedType == CEMU_EMBED_INSTALL_BASE_GAME
-			? "Instalando jogo..."
-			: expectedType == CEMU_EMBED_INSTALL_UPDATE
-				? "Instalando atualização..."
-				: "Instalando DLC...";
-		create_task([this, folder, expectedType]()
+		launchStatus->Text = "Instalando conteúdo...";
+		create_task([this, folder]()
 		{
 			uint64_t baseTitleId{};
 			const bool installed = m_main &&
-				m_main->InstallTitle(folder, expectedType, &baseTitleId);
+				m_main->InstallTitle(folder, CEMU_EMBED_INSTALL_AUTO, &baseTitleId);
 			return installed ? baseTitleId : uint64_t{};
 		}).then([this](uint64_t installedBaseTitleId)
 		{
@@ -386,9 +374,7 @@ void DirectXPage::RefreshLibrary()
 void DirectXPage::SetLibraryActionsEnabled(bool enabled)
 {
 	const bool canUse = enabled && m_cemuReady;
-	installGameButton->IsEnabled = canUse;
-	installUpdateButton->IsEnabled = canUse;
-	installDlcButton->IsEnabled = canUse;
+	installContentButton->IsEnabled = canUse;
 	refreshLibraryButton->IsEnabled = canUse;
 	installGraphicPacksButton->IsEnabled = canUse;
 	installedGamesList->IsEnabled = enabled;
