@@ -179,6 +179,13 @@ bool Cemu_UWP_HostMain::EnsureDefaultGamepadProfile()
 		CEMU_EMBED_OK && ready != 0;
 }
 
+bool Cemu_UWP_HostMain::SetVirtualMouse(int x, int y, bool leftDown, bool enabled)
+{
+	return m_instance &&
+		CemuEmbed_SetVirtualMouse(m_instance, x, y,
+			leftDown ? 1 : 0, enabled ? 1 : 0) == CEMU_EMBED_OK;
+}
+
 CemuEmbedResult __cdecl Cemu_UWP_HostMain::InstalledTitleFound(
 	void* userData, const CemuEmbedInstalledTitle* title)
 {

@@ -92,8 +92,9 @@ void DX::DeviceResources::CreateDeviceIndependentResources()
 	D2D1_FACTORY_OPTIONS options;
 	ZeroMemory(&options, sizeof(D2D1_FACTORY_OPTIONS));
 
-#if defined(_DEBUG)
-	// Se o projeto estiver em uma compilação de depuração, habilite a depuração do Direct2D via Camadas do SDK.
+#if defined(_DEBUG) && defined(CEMU_UWP_ENABLE_D2D_DEBUG_LAYER)
+	// A validação do Direct2D também é opt-in para que uma compilação Debug
+	// comum mantenha o mesmo caminho de apresentação leve usado em Release.
 	options.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
 #endif
 
@@ -134,10 +135,13 @@ void DX::DeviceResources::CreateDeviceResources()
 	// do padrão da API. Isso é necessário para compatibilidade com o Direct2D.
 	UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 
-#if defined(_DEBUG)
+#if defined(_DEBUG) && defined(CEMU_UWP_ENABLE_D3D11_DEBUG_LAYER)
 	if (DX::SdkLayersAvailable())
 	{
-		// Se o projeto estiver em uma compilação de depuração, habilite a depuração via Camadas do SDK com este sinalizador.
+		// The D3D debug layer serializes and validates every renderer command. It is
+		// intentionally opt-in because the emulator issues thousands of commands
+		// per frame and otherwise becomes substantially slower even when no error is
+		// reported. Define CEMU_UWP_ENABLE_D3D11_DEBUG_LAYER for GPU diagnostics.
 		creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
 	}
 #endif

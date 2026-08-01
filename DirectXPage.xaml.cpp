@@ -30,6 +30,20 @@ Platform::String^ FromUtf8(const std::string& value)
 	MultiByteToWideChar(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), &converted[0], length);
 	return ref new Platform::String(converted.c_str(), static_cast<unsigned int>(converted.size()));
 }
+
+bool HasGamepadButton(GamepadButtons buttons, GamepadButtons button)
+{
+	return (static_cast<unsigned int>(buttons) & static_cast<unsigned int>(button)) != 0;
+}
+
+double ApplyStickDeadzone(double value)
+{
+	constexpr double deadzone = 0.18;
+	const double magnitude = std::abs(value);
+	if (magnitude <= deadzone)
+		return 0.0;
+	return std::copysign((magnitude - deadzone) / (1.0 - deadzone), value);
+}
 }
 
 // This is the desktop interop interface implemented by CoreWindow. Do not use
@@ -122,12 +136,15 @@ DirectXPage::~DirectXPage()
 	Gamepad::GamepadRemoved -= m_gamepadRemovedToken;
 	RawGameController::RawGameControllerAdded -= m_rawControllerAddedToken;
 	RawGameController::RawGameControllerRemoved -= m_rawControllerRemovedToken;
+	if (m_main)
+		m_main->SetVirtualMouse(0, 0, false, false);
 	m_main.reset();
 }
 
 void DirectXPage::OnRendering(Platform::Object^, Platform::Object^)
 {
 	if (m_main) m_main->Pump();
+	UpdateVirtualMouse();
 	if (++m_controllerPollFrames >= 60)
 	{
 		m_controllerPollFrames = 0;
@@ -156,7 +173,13 @@ void DirectXPage::OnGamepadRemoved(Platform::Object^, Gamepad^)
 	// SDL3-UWP emits the matching removal event and releases the controller.
 	m_gamepadProfileReady = false;
 	create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Normal,
-		ref new DispatchedHandler([this]() { UpdateGamepadStatus(); })));
+		ref new DispatchedHandler([this]()
+		{
+			if (m_virtualMouseEnabled)
+				SetVirtualMouseEnabled(false);
+			else
+				UpdateGamepadStatus();
+		})));
 }
 
 void DirectXPage::OnRawGameControllerAdded(Platform::Object^, RawGameController^)
@@ -273,6 +296,7 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 		if (launched)
 		{
 			m_gameRunning = true;
+			UpdateGamepadStatus();
 			launchStatus->Text = "Jogo em execução";
 			FocusEmulatorInput();
 		}
@@ -497,9 +521,114 @@ void DirectXPage::OnCemuStateChanged(CemuEmbedState state)
 				accountStatus->Text = "Conta indisponível";
 			}
 			if (state != CEMU_EMBED_STATE_READY)
+			{
+				m_gameRunning = false;
+				if (m_virtualMouseEnabled)
+					SetVirtualMouseEnabled(false);
 				SetLibraryActionsEnabled(false);
+			}
 			UpdateStartButton();
 		})));
+}
+
+void DirectXPage::SetVirtualMouseEnabled(bool enabled)
+{
+	if (m_virtualMouseEnabled == enabled)
+		return;
+
+	m_virtualMouseEnabled = enabled;
+	m_virtualMouseLeftDown = false;
+	m_virtualMouseLastUpdate = std::chrono::steady_clock::now();
+	if (enabled)
+	{
+		const double width = emulatorViewport->ActualWidth;
+		const double height = emulatorViewport->ActualHeight;
+		if (m_virtualMouseX <= 0.0 && m_virtualMouseY <= 0.0)
+		{
+			m_virtualMouseX = width * 0.5;
+			m_virtualMouseY = height * 0.5;
+		}
+		m_virtualMouseX = (std::min)((std::max)(m_virtualMouseX, 0.0), (std::max)(width - 1.0, 0.0));
+		m_virtualMouseY = (std::min)((std::max)(m_virtualMouseY, 0.0), (std::max)(height - 1.0, 0.0));
+		virtualMouseTransform->X = m_virtualMouseX - 2.0;
+		virtualMouseTransform->Y = m_virtualMouseY - 2.0;
+		virtualMouseCursor->Visibility = VisibleValue;
+
+		const double scaleX = emulatorSurface->CompositionScaleX > 0.0f
+			? emulatorSurface->CompositionScaleX : 1.0;
+		const double scaleY = emulatorSurface->CompositionScaleY > 0.0f
+			? emulatorSurface->CompositionScaleY : 1.0;
+		if (m_main)
+			m_main->SetVirtualMouse(
+				static_cast<int>(std::lround(m_virtualMouseX * scaleX)),
+				static_cast<int>(std::lround(m_virtualMouseY * scaleY)), false, true);
+	}
+	else
+	{
+		if (m_main)
+			m_main->SetVirtualMouse(0, 0, false, false);
+		virtualMouseCursor->Visibility = CollapsedValue;
+	}
+	UpdateGamepadStatus();
+}
+
+void DirectXPage::UpdateVirtualMouse()
+{
+	if (!m_gameRunning || !m_gamepadProfileReady || Gamepad::Gamepads->Size == 0)
+	{
+		m_virtualMouseChordHeld = false;
+		if (m_virtualMouseEnabled)
+			SetVirtualMouseEnabled(false);
+		return;
+	}
+
+	try
+	{
+		const auto reading = Gamepad::Gamepads->GetAt(0)->GetCurrentReading();
+		const bool chord =
+			HasGamepadButton(reading.Buttons, GamepadButtons::LeftShoulder) &&
+			HasGamepadButton(reading.Buttons, GamepadButtons::RightShoulder);
+		if (chord && !m_virtualMouseChordHeld)
+			SetVirtualMouseEnabled(!m_virtualMouseEnabled);
+		m_virtualMouseChordHeld = chord;
+
+		const auto now = std::chrono::steady_clock::now();
+		if (!m_virtualMouseEnabled)
+		{
+			m_virtualMouseLastUpdate = now;
+			return;
+		}
+
+		double elapsed = std::chrono::duration<double>(now - m_virtualMouseLastUpdate).count();
+		m_virtualMouseLastUpdate = now;
+		elapsed = (std::min)((std::max)(elapsed, 0.0), 0.05);
+		constexpr double cursorSpeed = 900.0;
+		const double width = emulatorViewport->ActualWidth;
+		const double height = emulatorViewport->ActualHeight;
+		m_virtualMouseX += ApplyStickDeadzone(reading.LeftThumbstickX) * cursorSpeed * elapsed;
+		m_virtualMouseY -= ApplyStickDeadzone(reading.LeftThumbstickY) * cursorSpeed * elapsed;
+		m_virtualMouseX = (std::min)((std::max)(m_virtualMouseX, 0.0), (std::max)(width - 1.0, 0.0));
+		m_virtualMouseY = (std::min)((std::max)(m_virtualMouseY, 0.0), (std::max)(height - 1.0, 0.0));
+		virtualMouseTransform->X = m_virtualMouseX - 2.0;
+		virtualMouseTransform->Y = m_virtualMouseY - 2.0;
+
+		m_virtualMouseLeftDown = HasGamepadButton(reading.Buttons, GamepadButtons::A);
+		const double scaleX = emulatorSurface->CompositionScaleX > 0.0f
+			? emulatorSurface->CompositionScaleX : 1.0;
+		const double scaleY = emulatorSurface->CompositionScaleY > 0.0f
+			? emulatorSurface->CompositionScaleY : 1.0;
+		if (m_main)
+			m_main->SetVirtualMouse(
+				static_cast<int>(std::lround(m_virtualMouseX * scaleX)),
+				static_cast<int>(std::lround(m_virtualMouseY * scaleY)),
+				m_virtualMouseLeftDown, true);
+	}
+	catch (...)
+	{
+		m_virtualMouseChordHeld = false;
+		if (m_virtualMouseEnabled)
+			SetVirtualMouseEnabled(false);
+	}
 }
 
 void DirectXPage::UpdateGamepadStatus()
@@ -520,7 +649,13 @@ void DirectXPage::UpdateGamepadStatus()
 		if (gamepadCount > 1)
 			text << L" (" << gamepadCount << L")";
 		if (m_gamepadProfileReady)
+		{
 			text << L" \u2022 perfil Wii U GamePad";
+			if (m_virtualMouseEnabled)
+				text << L" \u2022 mouse ativo (A: clique; L+R: fechar)";
+			else if (m_gameRunning)
+				text << L" \u2022 L+R: mouse";
+		}
 		else
 			text << L" \u2022 preparando perfil";
 	}

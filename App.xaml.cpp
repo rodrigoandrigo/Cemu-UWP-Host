@@ -41,7 +41,7 @@ App::App()
 /// <param name="e">Detalhes sobre a solicitação e o processo de inicialização.</param>
 void App::OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEventArgs^ e)
 {
-#if _DEBUG
+#if defined(_DEBUG) && defined(CEMU_UWP_ENABLE_XAML_FPS_COUNTER)
 	if (IsDebuggerPresent())
 	{
 		DebugSettings->EnableFrameRateCounter = true;

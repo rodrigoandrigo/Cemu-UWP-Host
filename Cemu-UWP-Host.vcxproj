@@ -105,7 +105,7 @@
     <GenerateAppInstallerFile>True</GenerateAppInstallerFile>
     <PackageCertificateKeyFile>Cemu-UWP-Host_TemporaryKey.pfx</PackageCertificateKeyFile>
     <AppxPackageSigningTimestampDigestAlgorithm>SHA256</AppxPackageSigningTimestampDigestAlgorithm>
-    <AppxAutoIncrementPackageRevision>False</AppxAutoIncrementPackageRevision>
+    <AppxAutoIncrementPackageRevision>True</AppxAutoIncrementPackageRevision>
     <GenerateTestArtifacts>False</GenerateTestArtifacts>
     <AppxBundle>Always</AppxBundle>
     <AppxBundlePlatforms>x64</AppxBundlePlatforms>
@@ -120,6 +120,7 @@
     <!-- The embedded runtime is shipped as one x64 Release payload. The host
          itself may still be built with Debug symbols. -->
     <CemuBinaryName>Cemu_release</CemuBinaryName>
+    <AppInstallerUri>C:\Users\rodri\Dev1\Projetos\Mteste2</AppInstallerUri>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <Link>

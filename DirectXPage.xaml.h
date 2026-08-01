@@ -3,6 +3,7 @@
 #include "DirectXPage.g.h"
 #include "Cemu_UWP_HostMain.h"
 #include "Common/DeviceResources.h"
+#include <chrono>
 
 namespace Cemu_UWP_Host
 {
@@ -50,6 +51,8 @@ namespace Cemu_UWP_Host
 		void UpdateGamepadStatus();
 		void UpdateActiveAccount();
 		void TryConfigureDefaultGamepad();
+		void UpdateVirtualMouse();
+		void SetVirtualMouseEnabled(bool enabled);
 		std::shared_ptr<DX::DeviceResources> m_deviceResources;
 		std::unique_ptr<Cemu_UWP_HostMain> m_main;
 		std::vector<InstalledTitle> m_installedTitles;
@@ -62,6 +65,12 @@ namespace Cemu_UWP_Host
 		bool m_libraryBusy = false;
 		bool m_gamepadProfileReady = false;
 		bool m_gameRunning = false;
+		bool m_virtualMouseEnabled = false;
+		bool m_virtualMouseChordHeld = false;
+		bool m_virtualMouseLeftDown = false;
+		double m_virtualMouseX = 0.0;
+		double m_virtualMouseY = 0.0;
+		std::chrono::steady_clock::time_point m_virtualMouseLastUpdate{};
 		unsigned int m_gamepadRetryFrames = 0;
 		unsigned int m_controllerPollFrames = 0;
 	};

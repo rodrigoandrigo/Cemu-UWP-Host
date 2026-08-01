@@ -84,6 +84,25 @@
                    Opacity="0.35" />
       </StackPanel>
 
+      <!-- GamePad virtual mouse. Its hotspot is driven in physical surface
+           coordinates while this visual follows the matching XAML position. -->
+      <StackPanel x:Name="virtualMouseCursor"
+                  Canvas.ZIndex="30"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Top"
+                  IsHitTestVisible="False"
+                  Background="#99000000"
+                  Padding="2"
+                  Opacity="0.9"
+                  Visibility="Collapsed">
+        <StackPanel.RenderTransform>
+          <TranslateTransform x:Name="virtualMouseTransform" />
+        </StackPanel.RenderTransform>
+        <FontIcon Glyph="&#xE7C9;"
+                  FontSize="28"
+                  Foreground="White" />
+      </StackPanel>
+
       <StackPanel x:Name="tabsPanel"
                   Canvas.ZIndex="10"
                   HorizontalAlignment="Stretch"
