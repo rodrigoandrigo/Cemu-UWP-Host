@@ -29,6 +29,10 @@ using namespace Windows::UI::Xaml::Navigation;
 App::App()
 {
 	InitializeComponent();
+	// Xbox defaults to a controller-driven pointer for some UWP layouts. Use
+	// focus navigation instead: D-pad moves focus and A invokes the focused
+	// control, without drawing the system mouse cursor over the application.
+	RequiresPointerMode = ApplicationRequiresPointerMode::WhenRequested;
 	Suspending += ref new SuspendingEventHandler(this, &App::OnSuspending);
 	Resuming += ref new EventHandler<Object^>(this, &App::OnResuming);
 }

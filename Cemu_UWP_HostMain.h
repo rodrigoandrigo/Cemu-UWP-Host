@@ -49,6 +49,7 @@ namespace Cemu_UWP_Host
 		bool ApplySafeGraphicPackPolicyForTitle(uint64_t baseTitleId,
 			uint32_t* affectedPackCount = nullptr);
 		bool EnsureDefaultGamepadProfile();
+		bool SetGamepadState(const CemuEmbedGamepadState& state);
 		bool SetVirtualMouse(int x, int y, bool leftDown, bool enabled);
 		void SetDiagnosticCallback(std::function<void(const std::string&)> callback);
 		void SetStateCallback(std::function<void(CemuEmbedState)> callback);

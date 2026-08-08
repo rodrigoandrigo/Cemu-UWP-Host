@@ -11,6 +11,7 @@ using namespace Windows::Foundation;
 using namespace Windows::Gaming::Input;
 using namespace Windows::Storage;
 using namespace Windows::Storage::Pickers;
+using namespace Windows::System;
 using namespace Windows::UI::Core;
 using namespace Windows::UI::Xaml;
 using namespace Windows::UI::Xaml::Controls;
@@ -36,13 +37,83 @@ bool HasGamepadButton(GamepadButtons buttons, GamepadButtons button)
 	return (static_cast<unsigned int>(buttons) & static_cast<unsigned int>(button)) != 0;
 }
 
+uint32_t NormalizeGamepadButtons(GamepadButtons buttons)
+{
+	uint32_t result = 0;
+	auto set = [&result, buttons](GamepadButtons button, uint32_t bit)
+	{
+		if (HasGamepadButton(buttons, button)) result |= 1u << bit;
+	};
+	set(GamepadButtons::A, 0); set(GamepadButtons::B, 1);
+	set(GamepadButtons::X, 2); set(GamepadButtons::Y, 3);
+	set(GamepadButtons::View, 4); set(GamepadButtons::Menu, 6);
+	set(GamepadButtons::LeftThumbstick, 7); set(GamepadButtons::RightThumbstick, 8);
+	set(GamepadButtons::LeftShoulder, 9); set(GamepadButtons::RightShoulder, 10);
+	set(GamepadButtons::DPadUp, 11); set(GamepadButtons::DPadDown, 12);
+	set(GamepadButtons::DPadLeft, 13); set(GamepadButtons::DPadRight, 14);
+	return result;
+}
+
 double ApplyStickDeadzone(double value)
 {
 	constexpr double deadzone = 0.18;
 	const double magnitude = std::abs(value);
 	if (magnitude <= deadzone)
 		return 0.0;
-	return std::copysign((magnitude - deadzone) / (1.0 - deadzone), value);
+	const double normalized = (magnitude - deadzone) / (1.0 - deadzone);
+	return std::copysign(normalized, value);
+}
+
+bool IsGamepadVirtualKey(VirtualKey key)
+{
+	switch (key)
+	{
+	case VirtualKey::GamepadA:
+	case VirtualKey::GamepadB:
+	case VirtualKey::GamepadX:
+	case VirtualKey::GamepadY:
+	case VirtualKey::GamepadRightShoulder:
+	case VirtualKey::GamepadLeftShoulder:
+	case VirtualKey::GamepadLeftTrigger:
+	case VirtualKey::GamepadRightTrigger:
+	case VirtualKey::GamepadDPadUp:
+	case VirtualKey::GamepadDPadDown:
+	case VirtualKey::GamepadDPadLeft:
+	case VirtualKey::GamepadDPadRight:
+	case VirtualKey::GamepadMenu:
+	case VirtualKey::GamepadView:
+	case VirtualKey::GamepadLeftThumbstickButton:
+	case VirtualKey::GamepadRightThumbstickButton:
+	case VirtualKey::GamepadLeftThumbstickUp:
+	case VirtualKey::GamepadLeftThumbstickDown:
+	case VirtualKey::GamepadLeftThumbstickRight:
+	case VirtualKey::GamepadLeftThumbstickLeft:
+	case VirtualKey::GamepadRightThumbstickUp:
+	case VirtualKey::GamepadRightThumbstickDown:
+	case VirtualKey::GamepadRightThumbstickRight:
+	case VirtualKey::GamepadRightThumbstickLeft:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool IsGamepadThumbstickNavigationKey(VirtualKey key)
+{
+	switch (key)
+	{
+	case VirtualKey::GamepadLeftThumbstickUp:
+	case VirtualKey::GamepadLeftThumbstickDown:
+	case VirtualKey::GamepadLeftThumbstickRight:
+	case VirtualKey::GamepadLeftThumbstickLeft:
+	case VirtualKey::GamepadRightThumbstickUp:
+	case VirtualKey::GamepadRightThumbstickDown:
+	case VirtualKey::GamepadRightThumbstickRight:
+	case VirtualKey::GamepadRightThumbstickLeft:
+		return true;
+	default:
+		return false;
+	}
 }
 }
 
@@ -58,18 +129,39 @@ struct __declspec(uuid("45D64A29-A63E-4CB6-B498-5781D298CB4F")) ICoreWindowInter
 DirectXPage::DirectXPage()
 {
 	InitializeComponent();
-	// Registering these WGI events is required for reliable Xbox gamepad
-	// discovery. SDL3-UWP consumes the controller state and rumble requests.
+	// Registering WGI events on the XAML thread. The host mirrors a plain
+	// controller snapshot into Cemu, so the DLL never has to use a WGI object
+	// from SDL's worker apartment on Xbox.
 	m_gamepadAddedToken =
 		Gamepad::GamepadAdded += ref new EventHandler<Gamepad^>(this, &DirectXPage::OnGamepadAdded);
 	m_gamepadRemovedToken =
 		Gamepad::GamepadRemoved += ref new EventHandler<Gamepad^>(this, &DirectXPage::OnGamepadRemoved);
-	m_rawControllerAddedToken =
-		RawGameController::RawGameControllerAdded +=
-		ref new EventHandler<RawGameController^>(this, &DirectXPage::OnRawGameControllerAdded);
-	m_rawControllerRemovedToken =
-		RawGameController::RawGameControllerRemoved +=
-		ref new EventHandler<RawGameController^>(this, &DirectXPage::OnRawGameControllerRemoved);
+	// Xbox also projects controller buttons as CoreWindow keys. Consume that
+	// parallel XAML navigation route while a title is running; otherwise B can
+	// become a system Back request even though the same button was already sent
+	// to Cemu through the apartment-owned WGI snapshot.
+	auto coreWindow = Window::Current->CoreWindow;
+	m_coreWindowKeyDownToken = coreWindow->KeyDown +=
+		ref new TypedEventHandler<CoreWindow^, KeyEventArgs^>(
+			this, &DirectXPage::OnCoreWindowKeyDown);
+	m_coreWindowKeyUpToken = coreWindow->KeyUp +=
+		ref new TypedEventHandler<CoreWindow^, KeyEventArgs^>(
+			this, &DirectXPage::OnCoreWindowKeyDown);
+	m_backRequestedToken = SystemNavigationManager::GetForCurrentView()->BackRequested +=
+		ref new EventHandler<BackRequestedEventArgs^>(this, &DirectXPage::OnBackRequested);
+	// The Added event is not guaranteed to be replayed for a controller that
+	// was connected before the app started. Enumerate once, then rely only on
+	// Added/Removed to maintain this apartment-owned reference.
+	try
+	{
+		auto gamepads = Gamepad::Gamepads;
+		if (gamepads && gamepads->Size != 0)
+			m_gamepad = gamepads->GetAt(0);
+	}
+	catch (Platform::Exception^)
+	{
+		m_gamepad = nullptr;
+	}
 	m_renderingToken =
 		CompositionTarget::Rendering += ref new EventHandler<Platform::Object^>(this, &DirectXPage::OnRendering);
 	UpdateGamepadStatus();
@@ -83,7 +175,9 @@ void DirectXPage::InitializeEmulator(float width, float height)
 	// Creating the template swap chain in the page constructor gives it a 1x1
 	// back buffer because XAML has not performed layout yet. Hand it to Cemu
 	// only after the first real SizeChanged event.
-	m_deviceResources = std::make_shared<DX::DeviceResources>();
+	// Cemu owns all D3D11 rendering once the swap chain is attached. Avoid
+	// allocating the template's unused D2D/DWrite/WIC and depth resources.
+	m_deviceResources = std::make_shared<DX::DeviceResources>(true);
 	m_deviceResources->SetSwapChainPanel(emulatorSurface);
 	// SetSwapChainPanel already captures ActualWidth/ActualHeight after the
 	// SizeChanged event. Resizing the just-created composition swap chain a
@@ -109,7 +203,7 @@ void DirectXPage::InitializeEmulator(float width, float height)
 					nullptr
 				};
 				m_deviceResources->ReleaseSizeDependentResourcesForExternalRenderer();
-				m_main = std::make_unique<Cemu_UWP_HostMain>(
+				m_main = std::make_shared<Cemu_UWP_HostMain>(
 					hwnd, d3d11Surface,
 					static_cast<int>(outputSize.Width),
 					static_cast<int>(outputSize.Height), dpiScale);
@@ -134,23 +228,35 @@ DirectXPage::~DirectXPage()
 	CompositionTarget::Rendering -= m_renderingToken;
 	Gamepad::GamepadAdded -= m_gamepadAddedToken;
 	Gamepad::GamepadRemoved -= m_gamepadRemovedToken;
-	RawGameController::RawGameControllerAdded -= m_rawControllerAddedToken;
-	RawGameController::RawGameControllerRemoved -= m_rawControllerRemovedToken;
+	Window::Current->CoreWindow->KeyDown -= m_coreWindowKeyDownToken;
+	Window::Current->CoreWindow->KeyUp -= m_coreWindowKeyUpToken;
+	SystemNavigationManager::GetForCurrentView()->BackRequested -= m_backRequestedToken;
+	m_gamepad = nullptr;
 	if (m_main)
+	{
 		m_main->SetVirtualMouse(0, 0, false, false);
+		CemuEmbedGamepadState disconnected{};
+		disconnected.struct_size = sizeof(disconnected);
+		disconnected.abi_version = CEMU_EMBED_GAMEPAD_VERSION;
+		m_main->SetGamepadState(disconnected);
+	}
 	m_main.reset();
 }
 
 void DirectXPage::OnRendering(Platform::Object^, Platform::Object^)
 {
 	if (m_main) m_main->Pump();
-	UpdateVirtualMouse();
+	const auto gamepadState = PublishGamepadState();
+	UpdateVirtualMouse(gamepadState);
 	if (++m_controllerPollFrames >= 60)
 	{
 		m_controllerPollFrames = 0;
 		UpdateGamepadStatus();
 	}
-	if (m_cemuReady && !m_gamepadProfileReady && Gamepad::Gamepads->Size > 0 &&
+	// A controller profile changes Cemu's input topology.  On Xbox this must
+	// complete before the title starts; changing it while Latte is consuming
+	// controller state can terminate the packaged process.
+	if (!m_gameRunning && m_cemuReady && !m_gamepadProfileReady && m_gamepad != nullptr &&
 		++m_gamepadRetryFrames >= 60)
 	{
 		m_gamepadRetryFrames = 0;
@@ -158,23 +264,34 @@ void DirectXPage::OnRendering(Platform::Object^, Platform::Object^)
 	}
 }
 
-void DirectXPage::OnGamepadAdded(Platform::Object^, Gamepad^)
+void DirectXPage::OnGamepadAdded(Platform::Object^, Gamepad^ gamepad)
 {
-	// SDL3-UWP receives the device through Windows.Gaming.Input and emits its
-	// normal SDL gamepad-added event for Cemu's SDLControllerProvider.
-	m_gamepadProfileReady = false;
-	m_gamepadRetryFrames = 59;
+	// Capture the WGI state while it belongs to the XAML apartment. Cemu uses
+	// the mirrored host state instead of opening this controller through SDL.
 	create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Normal,
-		ref new DispatchedHandler([this]() { UpdateGamepadStatus(); })));
+		ref new DispatchedHandler([this, gamepad]()
+		{
+			// WGI raises device events on a system callback thread.  Keep all
+			// page state on the XAML dispatcher; racing OnRendering here can make
+			// the Xbox terminate the packaged game without a managed exception.
+			m_gamepad = gamepad;
+			m_gamepadProfileReady = false;
+			m_gamepadRetryFrames = 59;
+			PublishGamepadState();
+			UpdateGamepadStatus();
+		})));
 }
 
-void DirectXPage::OnGamepadRemoved(Platform::Object^, Gamepad^)
+void DirectXPage::OnGamepadRemoved(Platform::Object^, Gamepad^ gamepad)
 {
-	// SDL3-UWP emits the matching removal event and releases the controller.
-	m_gamepadProfileReady = false;
+	// Publish a disconnected host state before updating the UI.
 	create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Normal,
-		ref new DispatchedHandler([this]()
+		ref new DispatchedHandler([this, gamepad]()
 		{
+			if (m_gamepad == gamepad)
+				m_gamepad = nullptr;
+			m_gamepadProfileReady = false;
+			PublishGamepadState();
 			if (m_virtualMouseEnabled)
 				SetVirtualMouseEnabled(false);
 			else
@@ -182,16 +299,25 @@ void DirectXPage::OnGamepadRemoved(Platform::Object^, Gamepad^)
 		})));
 }
 
-void DirectXPage::OnRawGameControllerAdded(Platform::Object^, RawGameController^)
+void DirectXPage::OnCoreWindowKeyDown(CoreWindow^, KeyEventArgs^ args)
 {
-	create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Normal,
-		ref new DispatchedHandler([this]() { UpdateGamepadStatus(); })));
+	if (!args || !IsGamepadVirtualKey(args->VirtualKey))
+		return;
+	// Before launch only the D-pad controls directional UI focus. Analog-stick
+	// virtual keys are consumed so Xbox cannot switch back to pointer-like
+	// navigation. Once a title runs every gamepad key belongs exclusively to
+	// the emulated Wii U controller.
+	if (m_gameRunning || IsGamepadThumbstickNavigationKey(args->VirtualKey))
+		args->Handled = true;
 }
 
-void DirectXPage::OnRawGameControllerRemoved(Platform::Object^, RawGameController^)
+void DirectXPage::OnBackRequested(Platform::Object^, BackRequestedEventArgs^ args)
 {
-	create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Normal,
-		ref new DispatchedHandler([this]() { UpdateGamepadStatus(); })));
+	if (m_gameRunning && args)
+	{
+		args->Handled = true;
+		OutputDebugStringW(L"[Cemu/UWP host] Xbox Back navigation suppressed while a title is running.\n");
+	}
 }
 
 void DirectXPage::InstallContent_Click(Platform::Object^, RoutedEventArgs^)
@@ -206,54 +332,59 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 	auto picker = ref new FolderPicker();
 	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
 	picker->FileTypeFilter->Append("*");
-	create_task(picker->PickSingleFolderAsync()).then([this](StorageFolder^ folder)
+	Platform::WeakReference weakThis(this);
+	create_task(picker->PickSingleFolderAsync()).then([weakThis](StorageFolder^ folder)
 	{
-		if (!folder) return;
-		m_libraryBusy = true;
-		SetLibraryActionsEnabled(false);
-		startButton->IsEnabled = false;
-		launchStatus->Text = "Importando graphic packs...";
-		const int selectedIndex = installedGamesList->SelectedIndex;
+		auto page = weakThis.Resolve<DirectXPage>();
+		if (!page || !folder) return;
+		page->m_libraryBusy = true;
+		page->SetLibraryActionsEnabled(false);
+		page->startButton->IsEnabled = false;
+		page->launchStatus->Text = "Importando graphic packs...";
+		const int selectedIndex = page->installedGamesList->SelectedIndex;
 		const uint64_t selectedTitleId =
-			selectedIndex >= 0 && static_cast<size_t>(selectedIndex) < m_installedTitles.size()
-				? m_installedTitles[selectedIndex].titleId : uint64_t{};
+			selectedIndex >= 0 && static_cast<size_t>(selectedIndex) < page->m_installedTitles.size()
+				? page->m_installedTitles[selectedIndex].titleId : uint64_t{};
 		std::vector<uint64_t> titleIds;
 		if (selectedTitleId)
 			titleIds.push_back(selectedTitleId);
 		else
-			for (const auto& title : m_installedTitles)
+			for (const auto& title : page->m_installedTitles)
 				titleIds.push_back(title.titleId);
-		create_task([this, folder, titleIds]()
+		const auto main = page->m_main;
+		create_task([main, folder, titleIds]()
 		{
 			uint32_t imported{};
-			if (!m_main || !m_main->InstallGraphicPacks(folder, &imported))
+			if (!main || !main->InstallGraphicPacks(folder, &imported))
 				return std::pair<uint32_t, uint32_t>{};
 			uint32_t enabled{};
 			for (const auto titleId : titleIds)
 			{
 				uint32_t affected{};
-				if (m_main->ApplySafeGraphicPackPolicyForTitle(titleId, &affected))
+				if (main->ApplySafeGraphicPackPolicyForTitle(titleId, &affected))
 					enabled += affected;
 			}
 			return std::make_pair(imported, enabled);
-		}).then([this](std::pair<uint32_t, uint32_t> result)
+		}).then([weakThis](std::pair<uint32_t, uint32_t> result)
 		{
-			m_libraryBusy = false;
-			SetLibraryActionsEnabled(true);
+			auto page = weakThis.Resolve<DirectXPage>();
+			if (!page) return;
+			page->m_libraryBusy = false;
+			page->SetLibraryActionsEnabled(true);
 			if (!result.first)
 			{
-				launchStatus->Text = "Falha ao importar graphic packs; veja a aba Erros";
-				SetTabsVisible(true);
-				toolTabs->SelectedIndex = 1;
-				UpdateStartButton();
+				page->launchStatus->Text = "Falha ao importar graphic packs; veja a aba Erros";
+				page->SetTabsVisible(true);
+				page->toolTabs->SelectedIndex = 1;
+				page->UpdateStartButton();
 				return;
 			}
 			std::ostringstream status;
 			status << result.first << " graphic pack(s) importado(s)";
 			if (result.second)
 				status << "; " << result.second << " ajustado(s) pela política segura";
-			launchStatus->Text = FromUtf8(status.str());
-			RefreshLibrary();
+			page->launchStatus->Text = FromUtf8(status.str());
+			page->RefreshLibrary();
 		}, task_continuation_context::use_current());
 	}, task_continuation_context::use_current());
 }
@@ -279,9 +410,30 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 		static_cast<size_t>(selectedIndex) >= m_installedTitles.size())
 		return;
 	const uint64_t titleId = m_installedTitles[selectedIndex].titleId;
+	// Keep Windows.Gaming.Input on the XAML apartment and finish the plain
+	// Cemu profile setup before the game creates its input threads.  This is
+	// the Xbox/Durango-safe lifetime model: no WGI object crosses into Cemu.
+	const auto gamepadState = PublishGamepadState();
+	if (gamepadState.connected)
+	{
+		TryConfigureDefaultGamepad();
+		if (!m_gamepadProfileReady)
+		{
+			launchStatus->Text = "N\xC3\xA3" "o foi poss\xC3\xAD" "vel preparar o perfil do Controle Xbox";
+			AppendError("O perfil Wii U GamePad n\xC3\xA3" "o foi conclu\xC3\xAD" "do antes de iniciar o jogo.");
+			UpdateGamepadStatus();
+			return;
+		}
+	}
 	SetTabsVisible(false);
 	startButton->IsEnabled = false;
 	SetLibraryActionsEnabled(false);
+	// Begin every title with the optional pointer disabled. Games that need a
+	// Wii U GamePad pointer can enable it with L+R; A remains its left click.
+	m_main->SetVirtualMouse(0, 0, false, false);
+	// LaunchInstalledTitle() starts Cemu title threads before its task
+	// continuation runs, so block profile replacement from this point onward.
+	m_gameRunning = true;
 	launchStatus->Text = "Montando jogo, atualização e DLC...";
 	emulatorPlaceholder->Visibility = CollapsedValue;
 	FocusEmulatorInput();
@@ -319,32 +471,37 @@ void DirectXPage::BeginInstall()
 	auto picker = ref new FolderPicker();
 	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
 	picker->FileTypeFilter->Append("*");
+	Platform::WeakReference weakThis(this);
 	create_task(picker->PickSingleFolderAsync()).then(
-		[this](StorageFolder^ folder)
+		[weakThis](StorageFolder^ folder)
 	{
-		if (!folder) return;
-		m_libraryBusy = true;
-		SetLibraryActionsEnabled(false);
-		startButton->IsEnabled = false;
-		launchStatus->Text = "Instalando conteúdo...";
-		create_task([this, folder]()
+		auto page = weakThis.Resolve<DirectXPage>();
+		if (!page || !folder) return;
+		page->m_libraryBusy = true;
+		page->SetLibraryActionsEnabled(false);
+		page->startButton->IsEnabled = false;
+		page->launchStatus->Text = "Instalando conteúdo...";
+		const auto main = page->m_main;
+		create_task([main, folder]()
 		{
 			uint64_t baseTitleId{};
-			const bool installed = m_main &&
-				m_main->InstallTitle(folder, CEMU_EMBED_INSTALL_AUTO, &baseTitleId);
+			const bool installed = main &&
+				main->InstallTitle(folder, CEMU_EMBED_INSTALL_AUTO, &baseTitleId);
 			return installed ? baseTitleId : uint64_t{};
-		}).then([this](uint64_t installedBaseTitleId)
+		}).then([weakThis](uint64_t installedBaseTitleId)
 		{
-			m_libraryBusy = false;
-			SetLibraryActionsEnabled(true);
+			auto page = weakThis.Resolve<DirectXPage>();
+			if (!page) return;
+			page->m_libraryBusy = false;
+			page->SetLibraryActionsEnabled(true);
 			if (!installedBaseTitleId)
 			{
-				launchStatus->Text = "Falha na instalação";
-				UpdateStartButton();
+				page->launchStatus->Text = "Falha na instalação";
+				page->UpdateStartButton();
 				return;
 			}
-			launchStatus->Text = "Instalação concluída";
-			RefreshLibrary();
+			page->launchStatus->Text = "Instalação concluída";
+			page->RefreshLibrary();
 		}, task_continuation_context::use_current());
 	}, task_continuation_context::use_current());
 }
@@ -539,24 +696,25 @@ void DirectXPage::SetVirtualMouseEnabled(bool enabled)
 	m_virtualMouseEnabled = enabled;
 	m_virtualMouseLeftDown = false;
 	m_virtualMouseLastUpdate = std::chrono::steady_clock::now();
+
 	if (enabled)
 	{
 		const double width = emulatorViewport->ActualWidth;
 		const double height = emulatorViewport->ActualHeight;
-		if (m_virtualMouseX <= 0.0 && m_virtualMouseY <= 0.0)
+		if (m_virtualMouseX <= 0.0 || m_virtualMouseY <= 0.0)
 		{
 			m_virtualMouseX = width * 0.5;
 			m_virtualMouseY = height * 0.5;
 		}
-		m_virtualMouseX = (std::min)((std::max)(m_virtualMouseX, 0.0), (std::max)(width - 1.0, 0.0));
-		m_virtualMouseY = (std::min)((std::max)(m_virtualMouseY, 0.0), (std::max)(height - 1.0, 0.0));
-		virtualMouseTransform->X = m_virtualMouseX - 2.0;
-		virtualMouseTransform->Y = m_virtualMouseY - 2.0;
+		m_virtualMouseX = (std::max)(0.0, (std::min)(m_virtualMouseX, width));
+		m_virtualMouseY = (std::max)(0.0, (std::min)(m_virtualMouseY, height));
+		virtualMouseTransform->X = m_virtualMouseX;
+		virtualMouseTransform->Y = m_virtualMouseY;
 		virtualMouseCursor->Visibility = VisibleValue;
 
-		const double scaleX = emulatorSurface->CompositionScaleX > 0.0f
+		const double scaleX = emulatorSurface->CompositionScaleX > 0.0
 			? emulatorSurface->CompositionScaleX : 1.0;
-		const double scaleY = emulatorSurface->CompositionScaleY > 0.0f
+		const double scaleY = emulatorSurface->CompositionScaleY > 0.0
 			? emulatorSurface->CompositionScaleY : 1.0;
 		if (m_main)
 			m_main->SetVirtualMouse(
@@ -569,12 +727,13 @@ void DirectXPage::SetVirtualMouseEnabled(bool enabled)
 			m_main->SetVirtualMouse(0, 0, false, false);
 		virtualMouseCursor->Visibility = CollapsedValue;
 	}
+
 	UpdateGamepadStatus();
 }
 
-void DirectXPage::UpdateVirtualMouse()
+void DirectXPage::UpdateVirtualMouse(const CemuEmbedGamepadState& gamepad)
 {
-	if (!m_gameRunning || !m_gamepadProfileReady || Gamepad::Gamepads->Size == 0)
+	if (!m_gameRunning || !m_gamepadProfileReady || !gamepad.connected)
 	{
 		m_virtualMouseChordHeld = false;
 		if (m_virtualMouseEnabled)
@@ -582,60 +741,52 @@ void DirectXPage::UpdateVirtualMouse()
 		return;
 	}
 
-	try
+	constexpr uint32_t leftShoulder = 1u << 9;
+	constexpr uint32_t rightShoulder = 1u << 10;
+	constexpr uint32_t buttonA = 1u << 0;
+	const bool chordPressed =
+		(gamepad.buttons & leftShoulder) != 0 &&
+		(gamepad.buttons & rightShoulder) != 0;
+	if (chordPressed && !m_virtualMouseChordHeld)
+		SetVirtualMouseEnabled(!m_virtualMouseEnabled);
+	m_virtualMouseChordHeld = chordPressed;
+
+	const auto now = std::chrono::steady_clock::now();
+	if (!m_virtualMouseEnabled)
 	{
-		const auto reading = Gamepad::Gamepads->GetAt(0)->GetCurrentReading();
-		const bool chord =
-			HasGamepadButton(reading.Buttons, GamepadButtons::LeftShoulder) &&
-			HasGamepadButton(reading.Buttons, GamepadButtons::RightShoulder);
-		if (chord && !m_virtualMouseChordHeld)
-			SetVirtualMouseEnabled(!m_virtualMouseEnabled);
-		m_virtualMouseChordHeld = chord;
-
-		const auto now = std::chrono::steady_clock::now();
-		if (!m_virtualMouseEnabled)
-		{
-			m_virtualMouseLastUpdate = now;
-			return;
-		}
-
-		double elapsed = std::chrono::duration<double>(now - m_virtualMouseLastUpdate).count();
 		m_virtualMouseLastUpdate = now;
-		elapsed = (std::min)((std::max)(elapsed, 0.0), 0.05);
-		constexpr double cursorSpeed = 900.0;
-		const double width = emulatorViewport->ActualWidth;
-		const double height = emulatorViewport->ActualHeight;
-		m_virtualMouseX += ApplyStickDeadzone(reading.LeftThumbstickX) * cursorSpeed * elapsed;
-		m_virtualMouseY -= ApplyStickDeadzone(reading.LeftThumbstickY) * cursorSpeed * elapsed;
-		m_virtualMouseX = (std::min)((std::max)(m_virtualMouseX, 0.0), (std::max)(width - 1.0, 0.0));
-		m_virtualMouseY = (std::min)((std::max)(m_virtualMouseY, 0.0), (std::max)(height - 1.0, 0.0));
-		virtualMouseTransform->X = m_virtualMouseX - 2.0;
-		virtualMouseTransform->Y = m_virtualMouseY - 2.0;
+		return;
+	}
 
-		m_virtualMouseLeftDown = HasGamepadButton(reading.Buttons, GamepadButtons::A);
-		const double scaleX = emulatorSurface->CompositionScaleX > 0.0f
-			? emulatorSurface->CompositionScaleX : 1.0;
-		const double scaleY = emulatorSurface->CompositionScaleY > 0.0f
-			? emulatorSurface->CompositionScaleY : 1.0;
-		if (m_main)
-			m_main->SetVirtualMouse(
-				static_cast<int>(std::lround(m_virtualMouseX * scaleX)),
-				static_cast<int>(std::lround(m_virtualMouseY * scaleY)),
-				m_virtualMouseLeftDown, true);
-	}
-	catch (...)
-	{
-		m_virtualMouseChordHeld = false;
-		if (m_virtualMouseEnabled)
-			SetVirtualMouseEnabled(false);
-	}
+	double elapsed = std::chrono::duration<double>(now - m_virtualMouseLastUpdate).count();
+	m_virtualMouseLastUpdate = now;
+	elapsed = (std::max)(0.0, (std::min)(elapsed, 0.05));
+	constexpr double cursorSpeed = 900.0;
+	m_virtualMouseX += ApplyStickDeadzone(gamepad.left_x) * cursorSpeed * elapsed;
+	m_virtualMouseY -= ApplyStickDeadzone(gamepad.left_y) * cursorSpeed * elapsed;
+
+	const double width = emulatorViewport->ActualWidth;
+	const double height = emulatorViewport->ActualHeight;
+	m_virtualMouseX = (std::max)(0.0, (std::min)(m_virtualMouseX, width));
+	m_virtualMouseY = (std::max)(0.0, (std::min)(m_virtualMouseY, height));
+	virtualMouseTransform->X = m_virtualMouseX;
+	virtualMouseTransform->Y = m_virtualMouseY;
+	m_virtualMouseLeftDown = (gamepad.buttons & buttonA) != 0;
+
+	const double scaleX = emulatorSurface->CompositionScaleX > 0.0
+		? emulatorSurface->CompositionScaleX : 1.0;
+	const double scaleY = emulatorSurface->CompositionScaleY > 0.0
+		? emulatorSurface->CompositionScaleY : 1.0;
+	if (m_main)
+		m_main->SetVirtualMouse(
+			static_cast<int>(std::lround(m_virtualMouseX * scaleX)),
+			static_cast<int>(std::lround(m_virtualMouseY * scaleY)),
+			m_virtualMouseLeftDown, true);
 }
 
 void DirectXPage::UpdateGamepadStatus()
 {
-	const unsigned int gamepadCount = Gamepad::Gamepads->Size;
-	const unsigned int rawCount = RawGameController::RawGameControllers->Size;
-	if (!gamepadCount && !rawCount)
+	if (!m_gamepad)
 	{
 		controllerStatus->Text = "Controle desconectado";
 		controllerStatus->Opacity = 0.65;
@@ -643,31 +794,68 @@ void DirectXPage::UpdateGamepadStatus()
 		return;
 	}
 	std::wostringstream text;
-	if (gamepadCount)
+	text << L"Controle Xbox conectado";
+	if (m_gamepadProfileReady)
 	{
-		text << L"Controle Xbox conectado";
-		if (gamepadCount > 1)
-			text << L" (" << gamepadCount << L")";
-		if (m_gamepadProfileReady)
-		{
-			text << L" \u2022 perfil Wii U GamePad";
-			if (m_virtualMouseEnabled)
-				text << L" \u2022 mouse ativo (A: clique; L+R: fechar)";
-			else if (m_gameRunning)
-				text << L" \u2022 L+R: mouse";
-		}
-		else
-			text << L" \u2022 preparando perfil";
+		text << L" \u2022 perfil Wii U GamePad";
+		if (m_virtualMouseEnabled)
+			text << L" \u2022 mouse virtual ativo (A: clique)";
+		else if (m_gameRunning)
+			text << L" \u2022 L+R: mouse virtual";
 	}
 	else
-	{
-		text << L"Controle conectado";
-		if (rawCount > 1)
-			text << L" (" << rawCount << L")";
-		text << L" \u2022 modo genérico";
-	}
+		text << L" \u2022 preparando perfil";
 	controllerStatus->Text = ref new Platform::String(text.str().c_str());
 	controllerStatus->Opacity = 1.0;
+}
+
+CemuEmbedGamepadState DirectXPage::PublishGamepadState()
+{
+	CemuEmbedGamepadState state{};
+	state.struct_size = sizeof(state);
+	state.abi_version = CEMU_EMBED_GAMEPAD_VERSION;
+	if (!m_main)
+		return state;
+	auto gamepad = m_gamepad;
+	if (!gamepad)
+	{
+		if (!m_hasPublishedGamepadState ||
+			std::memcmp(&state, &m_lastPublishedGamepadState, sizeof(state)) != 0)
+		{
+			m_main->SetGamepadState(state);
+			m_lastPublishedGamepadState = state;
+			m_hasPublishedGamepadState = true;
+		}
+		return state;
+	}
+
+	try
+	{
+		auto reading = gamepad->GetCurrentReading();
+		state.connected = 1;
+		state.buttons = NormalizeGamepadButtons(reading.Buttons);
+		state.left_x = static_cast<float>(reading.LeftThumbstickX);
+		state.left_y = static_cast<float>(reading.LeftThumbstickY);
+		state.right_x = static_cast<float>(reading.RightThumbstickX);
+		state.right_y = static_cast<float>(reading.RightThumbstickY);
+		state.left_trigger = static_cast<float>(reading.LeftTrigger);
+		state.right_trigger = static_cast<float>(reading.RightTrigger);
+	}
+	catch (Platform::Exception^)
+	{
+		// The Xbox may revoke the user-device association while a removal event
+		// is in flight. Do not allow that WinRT exception to escape OnRendering.
+		m_gamepad = nullptr;
+		m_gamepadProfileReady = false;
+	}
+	if (!m_hasPublishedGamepadState ||
+		std::memcmp(&state, &m_lastPublishedGamepadState, sizeof(state)) != 0)
+	{
+		m_main->SetGamepadState(state);
+		m_lastPublishedGamepadState = state;
+		m_hasPublishedGamepadState = true;
+	}
+	return state;
 }
 
 void DirectXPage::UpdateActiveAccount()
@@ -692,8 +880,20 @@ void DirectXPage::UpdateActiveAccount()
 
 void DirectXPage::TryConfigureDefaultGamepad()
 {
-	if (!m_main || !m_cemuReady || Gamepad::Gamepads->Size == 0)
+	if (!m_main || !m_cemuReady || m_gameRunning || !m_gamepad)
 		return;
+
+	// Do not schedule this through a PPL worker.  The Xbox shell can deliver
+	// Gamepad events while that worker races the Cemu input/update threads.
+	// This call only consumes the already-published POD state and is made on
+	// the XAML thread, before a title is allowed to run.
+	const auto state = PublishGamepadState();
+	if (!state.connected)
+	{
+		m_gamepadProfileReady = false;
+		UpdateGamepadStatus();
+		return;
+	}
 	m_gamepadProfileReady = m_main->EnsureDefaultGamepadProfile();
 	UpdateGamepadStatus();
 }

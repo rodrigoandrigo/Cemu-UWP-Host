@@ -84,8 +84,8 @@
                    Opacity="0.35" />
       </StackPanel>
 
-      <!-- GamePad virtual mouse. Its hotspot is driven in physical surface
-           coordinates while this visual follows the matching XAML position. -->
+      <!-- Optional in-game Wii U GamePad pointer. This is not used for XAML
+           navigation; L+R toggles it only after a title has started. -->
       <StackPanel x:Name="virtualMouseCursor"
                   Canvas.ZIndex="30"
                   HorizontalAlignment="Left"

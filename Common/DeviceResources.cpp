@@ -67,7 +67,7 @@ namespace ScreenRotation
 };
 
 // Construtor para DeviceResources.
-DX::DeviceResources::DeviceResources() : 
+DX::DeviceResources::DeviceResources(bool externalRenderer) : 
 	m_screenViewport(),
 	m_d3dFeatureLevel(D3D_FEATURE_LEVEL_9_1),
 	m_d3dRenderTargetSize(),
@@ -79,9 +79,11 @@ DX::DeviceResources::DeviceResources() :
 	m_effectiveDpi(-1.0f),
 	m_compositionScaleX(1.0f),
 	m_compositionScaleY(1.0f),
-	m_deviceNotify(nullptr)
+	m_deviceNotify(nullptr),
+	m_externalRenderer(externalRenderer)
 {
-	CreateDeviceIndependentResources();
+	if (!m_externalRenderer)
+		CreateDeviceIndependentResources();
 	CreateDeviceResources();
 }
 
@@ -210,6 +212,11 @@ void DX::DeviceResources::CreateDeviceResources()
 		context.As(&m_d3dContext)
 		);
 
+	// The embedded Cemu path never uses Direct2D, DirectWrite or WIC. Avoid
+	// their allocations and setup work on Xbox.
+	if (m_externalRenderer)
+		return;
+
 	// Crie o objeto do dispositivo Direct2D e um contexto correspondente.
 	ComPtr<IDXGIDevice3> dxgiDevice;
 	DX::ThrowIfFailed(
@@ -235,7 +242,8 @@ void DX::DeviceResources::CreateWindowSizeDependentResources()
 	ID3D11RenderTargetView* nullViews[] = {nullptr};
 	m_d3dContext->OMSetRenderTargets(ARRAYSIZE(nullViews), nullViews, nullptr);
 	m_d3dRenderTargetView = nullptr;
-	m_d2dContext->SetTarget(nullptr);
+	if (m_d2dContext)
+		m_d2dContext->SetTarget(nullptr);
 	m_d2dTargetBitmap = nullptr;
 	m_d3dDepthStencilView = nullptr;
 	m_d3dContext->Flush1(D3D11_CONTEXT_TYPE_ALL, nullptr);
@@ -409,6 +417,11 @@ void DX::DeviceResources::CreateWindowSizeDependentResources()
 		spSwapChain2->SetMatrixTransform(&inverseScale)
 		);
 
+	// Cemu owns all render targets, depth buffers and viewport state once the
+	// composition swap chain is attached. The host only maintains its size.
+	if (m_externalRenderer)
+		return;
+
 	// Crie uma exibição de destino de renderização do buffer de fundo da cadeia de troca.
 	ComPtr<ID3D11Texture2D1> backBuffer;
 	DX::ThrowIfFailed(
@@ -539,7 +552,8 @@ void DX::DeviceResources::SetSwapChainPanel(SwapChainPanel^ panel)
 	m_compositionScaleX = panel->CompositionScaleX;
 	m_compositionScaleY = panel->CompositionScaleY;
 	m_dpi = currentDisplayInformation->LogicalDpi;
-	m_d2dContext->SetDpi(m_dpi, m_dpi);
+	if (m_d2dContext)
+		m_d2dContext->SetDpi(m_dpi, m_dpi);
 
 	CreateWindowSizeDependentResources();
 }
@@ -552,7 +566,8 @@ void DX::DeviceResources::ReleaseSizeDependentResourcesForExternalRenderer()
 	// fail with DXGI_ERROR_INVALID_CALL when the XAML layout changes.
 	ID3D11RenderTargetView* nullViews[] = { nullptr };
 	m_d3dContext->OMSetRenderTargets(ARRAYSIZE(nullViews), nullViews, nullptr);
-	m_d2dContext->SetTarget(nullptr);
+	if (m_d2dContext)
+		m_d2dContext->SetTarget(nullptr);
 	m_d3dRenderTargetView = nullptr;
 	m_d2dTargetBitmap = nullptr;
 	m_d3dDepthStencilView = nullptr;
@@ -575,7 +590,8 @@ void DX::DeviceResources::SetDpi(float dpi)
 	if (dpi != m_dpi)
 	{
 		m_dpi = dpi;
-		m_d2dContext->SetDpi(m_dpi, m_dpi);
+		if (m_d2dContext)
+			m_d2dContext->SetDpi(m_dpi, m_dpi);
 		CreateWindowSizeDependentResources();
 	}
 }
@@ -665,7 +681,8 @@ void DX::DeviceResources::HandleDeviceLost()
 	}
 
 	CreateDeviceResources();
-	m_d2dContext->SetDpi(m_dpi, m_dpi);
+	if (m_d2dContext)
+		m_d2dContext->SetDpi(m_dpi, m_dpi);
 	CreateWindowSizeDependentResources();
 
 	if (m_deviceNotify != nullptr)

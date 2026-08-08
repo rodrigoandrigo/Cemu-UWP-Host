@@ -21,10 +21,10 @@ namespace Cemu_UWP_Host
 		void OnRendering(Platform::Object^ sender, Platform::Object^ args);
 		void OnGamepadAdded(Platform::Object^ sender, Windows::Gaming::Input::Gamepad^ gamepad);
 		void OnGamepadRemoved(Platform::Object^ sender, Windows::Gaming::Input::Gamepad^ gamepad);
-		void OnRawGameControllerAdded(Platform::Object^ sender,
-			Windows::Gaming::Input::RawGameController^ controller);
-		void OnRawGameControllerRemoved(Platform::Object^ sender,
-			Windows::Gaming::Input::RawGameController^ controller);
+		void OnCoreWindowKeyDown(Windows::UI::Core::CoreWindow^ sender,
+			Windows::UI::Core::KeyEventArgs^ args);
+		void OnBackRequested(Platform::Object^ sender,
+			Windows::UI::Core::BackRequestedEventArgs^ args);
 		void InstallContent_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void InstallGraphicPacks_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void RefreshLibrary_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
@@ -49,18 +49,24 @@ namespace Cemu_UWP_Host
 		void SetLibraryActionsEnabled(bool enabled);
 		void UpdateStartButton();
 		void UpdateGamepadStatus();
+		CemuEmbedGamepadState PublishGamepadState();
 		void UpdateActiveAccount();
 		void TryConfigureDefaultGamepad();
-		void UpdateVirtualMouse();
+		void UpdateVirtualMouse(const CemuEmbedGamepadState& gamepad);
 		void SetVirtualMouseEnabled(bool enabled);
 		std::shared_ptr<DX::DeviceResources> m_deviceResources;
-		std::unique_ptr<Cemu_UWP_HostMain> m_main;
+		std::shared_ptr<Cemu_UWP_HostMain> m_main;
 		std::vector<InstalledTitle> m_installedTitles;
 		Windows::Foundation::EventRegistrationToken m_renderingToken{};
 		Windows::Foundation::EventRegistrationToken m_gamepadAddedToken{};
 		Windows::Foundation::EventRegistrationToken m_gamepadRemovedToken{};
-		Windows::Foundation::EventRegistrationToken m_rawControllerAddedToken{};
-		Windows::Foundation::EventRegistrationToken m_rawControllerRemovedToken{};
+		Windows::Foundation::EventRegistrationToken m_coreWindowKeyDownToken{};
+		Windows::Foundation::EventRegistrationToken m_coreWindowKeyUpToken{};
+		Windows::Foundation::EventRegistrationToken m_backRequestedToken{};
+		// Keep the WinRT controller discovered on the XAML apartment. Querying
+		// Gamepad::Gamepads on every composition frame re-enters Xbox PnP/user
+		// association code and can produce E_INVALIDARG/E_ACCESSDENIED failures.
+		Windows::Gaming::Input::Gamepad^ m_gamepad = nullptr;
 		bool m_cemuReady = false;
 		bool m_libraryBusy = false;
 		bool m_gamepadProfileReady = false;
@@ -68,6 +74,10 @@ namespace Cemu_UWP_Host
 		bool m_virtualMouseEnabled = false;
 		bool m_virtualMouseChordHeld = false;
 		bool m_virtualMouseLeftDown = false;
+		// The Xbox input object belongs to the XAML apartment. Keep one snapshot
+		// per composition frame and send it to the DLL only when it changed.
+		CemuEmbedGamepadState m_lastPublishedGamepadState{};
+		bool m_hasPublishedGamepadState = false;
 		double m_virtualMouseX = 0.0;
 		double m_virtualMouseY = 0.0;
 		std::chrono::steady_clock::time_point m_virtualMouseLastUpdate{};

@@ -13,7 +13,9 @@ namespace DX
 	class DeviceResources
 	{
 	public:
-		DeviceResources();
+		// externalRenderer skips template D2D/DWrite/WIC and depth resources.
+		// Use it when an embedded renderer exclusively owns the swap chain.
+		explicit DeviceResources(bool externalRenderer = false);
 		void SetSwapChainPanel(Windows::UI::Xaml::Controls::SwapChainPanel^ panel);
 		void ReleaseSizeDependentResourcesForExternalRenderer();
 		void SetLogicalSize(Windows::Foundation::Size logicalSize);
@@ -104,5 +106,6 @@ namespace DX
 
 		// O IDeviceNotify pode ser mantido diretamente, pois tem os DeviceResources.
 		IDeviceNotify* m_deviceNotify;
+		bool m_externalRenderer;
 	};
 }
