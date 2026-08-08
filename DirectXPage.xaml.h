@@ -30,6 +30,8 @@ namespace Cemu_UWP_Host
 		void RefreshLibrary_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void InstalledGames_SelectionChanged(Platform::Object^ sender,
 			Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ args);
+		void InstalledGames_ItemClick(Platform::Object^ sender,
+			Windows::UI::Xaml::Controls::ItemClickEventArgs^ args);
 		void StartGame_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void ToggleTabs_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void ClearErrors_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
@@ -48,6 +50,7 @@ namespace Cemu_UWP_Host
 		void RefreshLibrary();
 		void SetLibraryActionsEnabled(bool enabled);
 		void UpdateStartButton();
+		int FindInstalledTitleIndex(uint64_t titleId) const;
 		void UpdateGamepadStatus();
 		CemuEmbedGamepadState PublishGamepadState();
 		void UpdateActiveAccount();
@@ -74,6 +77,8 @@ namespace Cemu_UWP_Host
 		bool m_virtualMouseEnabled = false;
 		bool m_virtualMouseChordHeld = false;
 		bool m_virtualMouseLeftDown = false;
+		uint64_t m_selectedTitleId = 0;
+		bool m_selectionRestoreQueued = false;
 		// The Xbox input object belongs to the XAML apartment. Keep one snapshot
 		// per composition frame and send it to the DLL only when it changed.
 		CemuEmbedGamepadState m_lastPublishedGamepadState{};

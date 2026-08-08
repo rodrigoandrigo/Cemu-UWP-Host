@@ -341,10 +341,7 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 		page->SetLibraryActionsEnabled(false);
 		page->startButton->IsEnabled = false;
 		page->launchStatus->Text = "Importando graphic packs...";
-		const int selectedIndex = page->installedGamesList->SelectedIndex;
-		const uint64_t selectedTitleId =
-			selectedIndex >= 0 && static_cast<size_t>(selectedIndex) < page->m_installedTitles.size()
-				? page->m_installedTitles[selectedIndex].titleId : uint64_t{};
+		const uint64_t selectedTitleId = page->m_selectedTitleId;
 		std::vector<uint64_t> titleIds;
 		if (selectedTitleId)
 			titleIds.push_back(selectedTitleId);
@@ -397,17 +394,69 @@ void DirectXPage::RefreshLibrary_Click(Platform::Object^, RoutedEventArgs^)
 void DirectXPage::InstalledGames_SelectionChanged(Platform::Object^,
 	SelectionChangedEventArgs^)
 {
-	if (installedGamesList->SelectedIndex >= 0 &&
-		static_cast<size_t>(installedGamesList->SelectedIndex) < m_installedTitles.size())
+	const int selectedIndex = installedGamesList->SelectedIndex;
+	const int committedIndex = FindInstalledTitleIndex(m_selectedTitleId);
+	if (m_libraryBusy)
+	{
+		UpdateStartButton();
+		return;
+	}
+
+	// SelectionChanged is also raised while Xbox moves focus with the D-pad.
+	// That is navigation, not confirmation. Only ItemClick (Gamepad A or a
+	// pointer click) is allowed to replace m_selectedTitleId.
+	if (committedIndex >= 0 && selectedIndex != committedIndex &&
+		!m_selectionRestoreQueued)
+	{
+		m_selectionRestoreQueued = true;
+		create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Low,
+			ref new DispatchedHandler([this]()
+			{
+				m_selectionRestoreQueued = false;
+				const int restoredIndex = FindInstalledTitleIndex(m_selectedTitleId);
+				if (restoredIndex >= 0 && installedGamesList->SelectedIndex != restoredIndex)
+					installedGamesList->SelectedIndex = restoredIndex;
+				if (restoredIndex >= 0)
+					launchStatus->Text = "Pronto para iniciar";
+				UpdateStartButton();
+			})));
+	}
+	else if (committedIndex >= 0)
+	{
 		launchStatus->Text = "Pronto para iniciar";
+	}
 	UpdateStartButton();
+}
+
+void DirectXPage::InstalledGames_ItemClick(Platform::Object^,
+	ItemClickEventArgs^ args)
+{
+	if (!args || !args->ClickedItem || m_libraryBusy)
+		return;
+
+	// Xbox pointer/controller activation is not guaranteed to leave the
+	// ListViewItem focused after the routed PointerPressed reaches the emulator
+	// viewport. Commit the clicked item explicitly instead of depending on the
+	// transient focus visual.
+	for (unsigned int index = 0; index < installedGamesList->Items->Size; ++index)
+	{
+		if (installedGamesList->Items->GetAt(index) != args->ClickedItem)
+			continue;
+		if (index < m_installedTitles.size())
+			m_selectedTitleId = m_installedTitles[index].titleId;
+		// Commit before assigning SelectedIndex. SelectionChanged can run
+		// synchronously and must already see the new title as authoritative.
+		installedGamesList->SelectedIndex = static_cast<int>(index);
+		launchStatus->Text = "Pronto para iniciar";
+		UpdateStartButton();
+		break;
+	}
 }
 
 void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 {
-	const int selectedIndex = installedGamesList->SelectedIndex;
-	if (!m_main || !m_main->IsReady() || selectedIndex < 0 ||
-		static_cast<size_t>(selectedIndex) >= m_installedTitles.size())
+	const int selectedIndex = FindInstalledTitleIndex(m_selectedTitleId);
+	if (!m_main || !m_main->IsReady() || selectedIndex < 0)
 		return;
 	const uint64_t titleId = m_installedTitles[selectedIndex].titleId;
 	// Keep Windows.Gaming.Input on the XAML apartment and finish the plain
@@ -543,11 +592,15 @@ void DirectXPage::RefreshLibrary()
 				<< "/" << title.compatibleGraphicPackCount << " ativos";
 			installedGamesList->Items->Append(FromUtf8(line.str()));
 		}
+		const int restoredIndex = FindInstalledTitleIndex(m_selectedTitleId);
+		installedGamesList->SelectedIndex = restoredIndex;
+		if (restoredIndex < 0)
+			m_selectedTitleId = 0;
 		m_libraryBusy = false;
 		SetLibraryActionsEnabled(true);
 		launchStatus->Text = m_installedTitles.empty()
 			? "Nenhum jogo instalado"
-			: "Selecione um jogo instalado";
+			: (restoredIndex >= 0 ? "Pronto para iniciar" : "Selecione um jogo instalado");
 		UpdateStartButton();
 	}, task_continuation_context::use_current());
 }
@@ -916,10 +969,18 @@ void DirectXPage::OnBrokeredProgress(uint64_t bytesCopied, uint64_t totalBytes, 
 
 void DirectXPage::UpdateStartButton()
 {
-	const int selectedIndex = installedGamesList->SelectedIndex;
 	startButton->IsEnabled = m_main != nullptr && m_cemuReady && !m_libraryBusy &&
-		selectedIndex >= 0 &&
-		static_cast<size_t>(selectedIndex) < m_installedTitles.size();
+		FindInstalledTitleIndex(m_selectedTitleId) >= 0;
+}
+
+int DirectXPage::FindInstalledTitleIndex(uint64_t titleId) const
+{
+	if (titleId == 0)
+		return -1;
+	for (size_t index = 0; index < m_installedTitles.size(); ++index)
+		if (m_installedTitles[index].titleId == titleId)
+			return static_cast<int>(index);
+	return -1;
 }
 
 void DirectXPage::SaveInternalState(Windows::Foundation::Collections::IPropertySet^)

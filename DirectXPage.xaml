@@ -141,6 +141,10 @@
             </CommandBar>
             <ListView x:Name="installedGamesList"
                       SelectionChanged="InstalledGames_SelectionChanged"
+                      ItemClick="InstalledGames_ItemClick"
+                      IsItemClickEnabled="True"
+                      SelectionMode="Single"
+                      SingleSelectionFollowsFocus="False"
                       MinHeight="105"
                       MaxHeight="155">
               <ListView.ItemTemplate>
