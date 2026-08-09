@@ -71,6 +71,8 @@ Projects/
 `-- SDL3-uwp/
 ```
 
+The modified Cemu runtime used by this host is maintained in the [rodrigoandrigo/Cemu repository](https://github.com/rodrigoandrigo/Cemu).
+
 The following MSBuild properties can be overridden if a different layout is used:
 
 | Property | Default | Purpose |
@@ -84,7 +86,7 @@ The following MSBuild properties can be overridden if a different layout is used
 - Visual Studio 18 2026 with the MSVC v145 C++ toolchain and UWP C++ tools.
 - Windows SDK `10.0.26100.0`.
 - CMake `3.21.1` or newer, using the native/Visual Studio copy rather than MSYS2 CMake for the MSVC generator.
-- A local checkout of the modified Cemu source tree.
+- A local checkout of the modified [rodrigoandrigo/Cemu](https://github.com/rodrigoandrigo/Cemu) source tree.
 - A local checkout of SDL3-UWP.
 - An x64 Direct3D 11-capable Windows system for desktop diagnostics validation target.
 
