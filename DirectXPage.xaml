@@ -7,17 +7,17 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
     IsTabStop="True"
-    Background="#FF071426">
+    Background="#FF051A13">
 
   <Page.Resources>
-    <SolidColorBrush x:Key="PageBackgroundBrush" Color="#FF071426" />
-    <SolidColorBrush x:Key="TopBarBrush" Color="#FF0A2A4D" />
-    <SolidColorBrush x:Key="PanelBrush" Color="#F20B2038" />
-    <SolidColorBrush x:Key="CardBrush" Color="#FF102D4D" />
+    <SolidColorBrush x:Key="PageBackgroundBrush" Color="#FF051A13" />
+    <SolidColorBrush x:Key="TopBarBrush" Color="#FF0A2A20" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#F20A241B" />
+    <SolidColorBrush x:Key="CardBrush" Color="#FF10382B" />
     <SolidColorBrush x:Key="AccentBlueBrush" Color="#FF1689E8" />
     <SolidColorBrush x:Key="AccentBlueHoverBrush" Color="#FF42A5F5" />
-    <SolidColorBrush x:Key="MutedTextBrush" Color="#FFB8CEE2" />
-    <SolidColorBrush x:Key="DividerBrush" Color="#FF275276" />
+    <SolidColorBrush x:Key="MutedTextBrush" Color="#FFBED8CE" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#FF2C6251" />
 
     <Style x:Key="SectionHeadingStyle" TargetType="TextBlock">
       <Setter Property="FontSize" Value="20" />
@@ -137,7 +137,7 @@
          are drawn over it and do not resize the SwapChainPanel. -->
     <Grid x:Name="emulatorViewport"
           Grid.Row="1"
-          Background="#FF02070D"
+          Background="#FF020B08"
           PointerPressed="EmulatorViewport_PointerPressed"
           SizeChanged="EmulatorViewport_SizeChanged">
       <SwapChainPanel x:Name="emulatorSurface"
@@ -151,7 +151,7 @@
         <TextBlock x:Name="emulatorPlaceholder"
                    Text="The game will appear here"
                    FontSize="16"
-                   Foreground="#8AB8CEE2" />
+                   Foreground="#8ABED8CE" />
       </StackPanel>
 
       <!-- Optional in-game Wii U GamePad pointer. This is not used for XAML
@@ -161,7 +161,7 @@
                   HorizontalAlignment="Left"
                   VerticalAlignment="Top"
                   IsHitTestVisible="False"
-                  Background="#CC0A2A4D"
+                  Background="#CC0A2A20"
                   Padding="3"
                   Opacity="0.95"
                   Visibility="Collapsed">
@@ -270,7 +270,7 @@
               </Grid>
 
               <Border Grid.Row="2"
-                      Background="#CC081A2D"
+                      Background="#CC071E17"
                       BorderBrush="{StaticResource DividerBrush}"
                       BorderThickness="1"
                       CornerRadius="5"
@@ -335,7 +335,7 @@
               </Grid>
 
               <Border Grid.Row="1"
-                      Background="#CC081A2D"
+                      Background="#CC071E17"
                       BorderBrush="{StaticResource DividerBrush}"
                       BorderThickness="1"
                       CornerRadius="5"
