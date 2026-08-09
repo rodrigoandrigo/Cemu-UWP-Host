@@ -7,68 +7,137 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
     IsTabStop="True"
-    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    Background="#FF071426">
 
-  <Grid Background="#FF0B0B0B">
+  <Page.Resources>
+    <SolidColorBrush x:Key="PageBackgroundBrush" Color="#FF071426" />
+    <SolidColorBrush x:Key="TopBarBrush" Color="#FF0A2A4D" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#F20B2038" />
+    <SolidColorBrush x:Key="CardBrush" Color="#FF102D4D" />
+    <SolidColorBrush x:Key="AccentBlueBrush" Color="#FF1689E8" />
+    <SolidColorBrush x:Key="AccentBlueHoverBrush" Color="#FF42A5F5" />
+    <SolidColorBrush x:Key="MutedTextBrush" Color="#FFB8CEE2" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#FF275276" />
+
+    <Style x:Key="SectionHeadingStyle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="20" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <Style x:Key="HelpfulTextStyle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="LibraryItemStyle" TargetType="ListViewItem">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="12,8" />
+      <Setter Property="Margin" Value="0,3" />
+      <Setter Property="MinHeight" Value="54" />
+    </Style>
+  </Page.Resources>
+
+  <Grid Background="{StaticResource PageBackgroundBrush}">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
-    <CommandBar Grid.Row="0"
-                Background="#FF202020"
-                DefaultLabelPosition="Right"
-                IsDynamicOverflowEnabled="False">
-      <CommandBar.Content>
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,20,0">
-          <TextBlock Text="Cemu" FontSize="22" FontWeight="SemiBold"
-                     VerticalAlignment="Center" Margin="0,0,12,0" />
-          <TextBlock x:Name="launchStatus"
-                     Text="Emulador inicializando..."
-                     VerticalAlignment="Center"
-                     Opacity="0.75" />
-          <StackPanel Orientation="Horizontal"
-                      VerticalAlignment="Center"
-                      Margin="24,0,0,0">
-            <FontIcon Glyph="&#xE7FC;"
-                      FontSize="14"
-                      VerticalAlignment="Center"
-                      Margin="0,0,6,0" />
-            <TextBlock x:Name="controllerStatus"
-                       Text="Controle desconectado"
-                       VerticalAlignment="Center"
-                       Foreground="DarkGray" />
+    <Border Grid.Row="0"
+            MinHeight="64"
+            Background="{StaticResource TopBarBrush}">
+      <StackPanel Orientation="Horizontal"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Center"
+                  Margin="18,0,24,0">
+          <Button x:Name="toggleTabsButton"
+                  Height="44"
+                  Padding="12,0"
+                  Background="Transparent"
+                  BorderThickness="0"
+                  Foreground="White"
+                  Click="ToggleTabs_Click">
+            <StackPanel Orientation="Horizontal">
+              <FontIcon Glyph="&#xE8FD;"
+                        FontSize="17"
+                        VerticalAlignment="Center"
+                        Margin="0,0,8,0" />
+              <TextBlock x:Name="toggleTabsButtonText"
+                         Text="Hide options"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button x:Name="startButton"
+                  Height="44"
+                  Padding="14,0"
+                  Background="Transparent"
+                  BorderThickness="0"
+                  Foreground="White"
+                  Click="StartGame_Click"
+                  IsEnabled="False">
+            <TextBlock Text="Start game"
+                       VerticalAlignment="Center" />
+          </Button>
+
+          <Border Width="1"
+                  Height="32"
+                  Background="{StaticResource DividerBrush}"
+                  Margin="10,0,22,0" />
+
+          <Border Width="5"
+                  Height="34"
+                  Background="{StaticResource AccentBlueBrush}"
+                  CornerRadius="3"
+                  Margin="0,0,12,0" />
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="Status"
+                       FontSize="12"
+                       Foreground="{StaticResource MutedTextBrush}" />
+            <TextBlock x:Name="launchStatus"
+                       Text="Initializing emulator..."
+                       FontSize="16"
+                       FontWeight="SemiBold"
+                       Foreground="White" />
           </StackPanel>
+
+          <Border Width="1"
+                  Height="32"
+                  Background="{StaticResource DividerBrush}"
+                  Margin="22,0" />
+
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <FontIcon Glyph="&#xE7FC;"
+                      FontSize="17"
+                      Foreground="{StaticResource AccentBlueBrush}"
+                      Margin="0,0,8,0" />
+            <TextBlock x:Name="controllerStatus"
+                       Text="Controller disconnected"
+                       VerticalAlignment="Center"
+                       Foreground="{StaticResource MutedTextBrush}" />
+          </StackPanel>
+
           <StackPanel Orientation="Horizontal"
                       VerticalAlignment="Center"
                       Margin="24,0,0,0">
             <FontIcon Glyph="&#xE77B;"
-                      FontSize="14"
-                      VerticalAlignment="Center"
-                      Margin="0,0,6,0" />
+                      FontSize="17"
+                      Foreground="{StaticResource AccentBlueBrush}"
+                      Margin="0,0,8,0" />
             <TextBlock x:Name="accountStatus"
-                       Text="Conta: carregando..."
+                       Text="Account: loading..."
                        VerticalAlignment="Center"
-                       Opacity="0.75" />
+                       Foreground="{StaticResource MutedTextBrush}" />
           </StackPanel>
-        </StackPanel>
-      </CommandBar.Content>
-      <AppBarButton x:Name="toggleTabsButton"
-                    Label="Ocultar abas"
-                    Icon="Bullets"
-                    Click="ToggleTabs_Click" />
-      <AppBarButton x:Name="startButton"
-                    Label="Iniciar jogo"
-                    Icon="Play"
-                    Click="StartGame_Click"
-                    IsEnabled="False" />
-    </CommandBar>
+      </StackPanel>
+    </Border>
 
-    <!-- The emulator fills the page below the command bar. The tool tabs are
-         drawn above it and never change the SwapChainPanel's layout size. -->
+    <!-- The emulator always fills the space below the command bar. The tools
+         are drawn over it and do not resize the SwapChainPanel. -->
     <Grid x:Name="emulatorViewport"
           Grid.Row="1"
-          Background="Black"
+          Background="#FF02070D"
           PointerPressed="EmulatorViewport_PointerPressed"
           SizeChanged="EmulatorViewport_SizeChanged">
       <SwapChainPanel x:Name="emulatorSurface"
@@ -80,8 +149,9 @@
                   VerticalAlignment="Center"
                   IsHitTestVisible="False">
         <TextBlock x:Name="emulatorPlaceholder"
-                   Text="O emulador será renderizado nesta área"
-                   Opacity="0.35" />
+                   Text="The game will appear here"
+                   FontSize="16"
+                   Foreground="#8AB8CEE2" />
       </StackPanel>
 
       <!-- Optional in-game Wii U GamePad pointer. This is not used for XAML
@@ -91,9 +161,9 @@
                   HorizontalAlignment="Left"
                   VerticalAlignment="Top"
                   IsHitTestVisible="False"
-                  Background="#99000000"
-                  Padding="2"
-                  Opacity="0.9"
+                  Background="#CC0A2A4D"
+                  Padding="3"
+                  Opacity="0.95"
                   Visibility="Collapsed">
         <StackPanel.RenderTransform>
           <TranslateTransform x:Name="virtualMouseTransform" />
@@ -107,85 +177,198 @@
                   Canvas.ZIndex="10"
                   HorizontalAlignment="Stretch"
                   VerticalAlignment="Top"
-                  MaxHeight="330"
-                  Background="#B3161616">
-      <Pivot x:Name="toolTabs" Background="Transparent">
-        <PivotItem Header="Biblioteca">
-          <StackPanel Padding="24,8,24,20">
-            <TextBlock Text="Jogos instalados"
-                       FontSize="18"
-                       FontWeight="SemiBold"
-                       Margin="0,0,0,4" />
-            <TextBlock Text="Instale pastas extraídas que contenham code, content e meta. Atualizações e DLCs são associados automaticamente pelo Title ID."
-                       TextWrapping="Wrap"
-                       Opacity="0.75"
-                       Margin="0,0,0,6" />
-            <CommandBar Background="Transparent"
-                        DefaultLabelPosition="Bottom"
-                        IsDynamicOverflowEnabled="True">
-              <AppBarButton x:Name="installContentButton"
-                            Label="Instalar conteúdo"
-                            Icon="Add"
-                            IsEnabled="False"
-                            Click="InstallContent_Click" />
-              <AppBarButton x:Name="refreshLibraryButton"
-                            Label="Atualizar lista"
-                            Icon="Refresh"
-                            IsEnabled="False"
-                            Click="RefreshLibrary_Click" />
-              <AppBarButton x:Name="installGraphicPacksButton"
-                            Label="Importar graphicPacks"
-                            Icon="Manage"
-                            IsEnabled="False"
-                            Click="InstallGraphicPacks_Click" />
-            </CommandBar>
-            <ListView x:Name="installedGamesList"
-                      SelectionChanged="InstalledGames_SelectionChanged"
-                      ItemClick="InstalledGames_ItemClick"
-                      IsItemClickEnabled="True"
-                      SelectionMode="Single"
-                      SingleSelectionFollowsFocus="False"
-                      MinHeight="105"
-                      MaxHeight="155">
-              <ListView.ItemTemplate>
-                <DataTemplate>
-                  <TextBlock Text="{Binding}"
-                             TextWrapping="Wrap"
-                             FontFamily="Consolas"
-                             Margin="0,3,0,3" />
-                </DataTemplate>
-              </ListView.ItemTemplate>
-            </ListView>
-          </StackPanel>
-        </PivotItem>
+                  MaxHeight="420"
+                  Background="{StaticResource PanelBrush}">
+        <Pivot x:Name="toolTabs"
+               Background="Transparent"
+               Foreground="White">
+          <PivotItem Header="My games">
+            <Grid Padding="24,6,24,22">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
 
-        <PivotItem Header="Erros">
-          <StackPanel Padding="24,8,24,20">
-            <TextBlock Text="Erros, bugs e falhas registrados nesta sessão"
-                       FontSize="16"
-                       FontWeight="SemiBold"
-                       Margin="0,0,0,4" />
-            <AppBarButton Label="Limpar erros"
-                          Icon="Delete"
-                          Click="ClearErrors_Click"
-                          HorizontalAlignment="Left" />
-            <ListView x:Name="errorsList"
-                      Margin="0,8,0,0"
-                      MinHeight="100"
-                      MaxHeight="190">
-              <ListView.ItemTemplate>
-                <DataTemplate>
-                  <TextBlock Text="{Binding}"
-                             TextWrapping="Wrap"
-                             FontFamily="Consolas"
-                             Foreground="Tomato" />
-                </DataTemplate>
-              </ListView.ItemTemplate>
-            </ListView>
-          </StackPanel>
-        </PivotItem>
-      </Pivot>
-    </StackPanel>
+              <Border Grid.Row="0"
+                      Background="{StaticResource CardBrush}"
+                      BorderBrush="{StaticResource DividerBrush}"
+                      BorderThickness="1"
+                      CornerRadius="6"
+                      Padding="16,12"
+                      Margin="0,0,0,10">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <Border Width="36"
+                          Height="36"
+                          Background="#332A9DF4"
+                          CornerRadius="18"
+                          VerticalAlignment="Top"
+                          Margin="0,0,12,0">
+                    <FontIcon Glyph="&#xE946;"
+                              FontSize="18"
+                              Foreground="{StaticResource AccentBlueBrush}"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center" />
+                  </Border>
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="Getting started"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Foreground="White" />
+                    <TextBlock Text="1. Install content  •  2. Choose a game and press A  •  3. Select Start game"
+                               Style="{StaticResource HelpfulTextStyle}"
+                               Margin="0,3,0,0" />
+                    <TextBlock Text="Extracted folders must contain code, content, and meta. Updates and DLC are linked automatically."
+                               Style="{StaticResource HelpfulTextStyle}"
+                               FontSize="13"
+                               Margin="0,2,0,0" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+
+              <Grid Grid.Row="1" Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="Installed games"
+                             Style="{StaticResource SectionHeadingStyle}" />
+                  <TextBlock Text="The confirmed game remains selected while you navigate the screen."
+                             Style="{StaticResource HelpfulTextStyle}"
+                             Margin="0,2,12,0" />
+                </StackPanel>
+
+                <CommandBar Grid.Column="1"
+                            Background="Transparent"
+                            Foreground="White"
+                            DefaultLabelPosition="Bottom"
+                            IsDynamicOverflowEnabled="True">
+                  <AppBarButton x:Name="installContentButton"
+                                Label="Install content"
+                                Icon="Add"
+                                Foreground="White"
+                                IsEnabled="False"
+                                Click="InstallContent_Click" />
+                  <AppBarButton x:Name="refreshLibraryButton"
+                                Label="Refresh list"
+                                Icon="Refresh"
+                                Foreground="White"
+                                IsEnabled="False"
+                                Click="RefreshLibrary_Click" />
+                  <AppBarButton x:Name="installGraphicPacksButton"
+                                Label="Import enhancements"
+                                Icon="Manage"
+                                Foreground="White"
+                                IsEnabled="False"
+                                Click="InstallGraphicPacks_Click" />
+                </CommandBar>
+              </Grid>
+
+              <Border Grid.Row="2"
+                      Background="#CC081A2D"
+                      BorderBrush="{StaticResource DividerBrush}"
+                      BorderThickness="1"
+                      CornerRadius="5"
+                      Padding="5">
+                <ListView x:Name="installedGamesList"
+                          Background="Transparent"
+                          Foreground="White"
+                          ItemContainerStyle="{StaticResource LibraryItemStyle}"
+                          SelectionChanged="InstalledGames_SelectionChanged"
+                          ItemClick="InstalledGames_ItemClick"
+                          IsItemClickEnabled="True"
+                          SelectionMode="Single"
+                          SingleSelectionFollowsFocus="False"
+                          MinHeight="105"
+                          MaxHeight="165">
+                  <ListView.Resources>
+                    <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#FF0D6ECA" />
+                    <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#FF1689E8" />
+                    <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#332A9DF4" />
+                    <SolidColorBrush x:Key="ListViewItemForegroundSelected" Color="White" />
+                  </ListView.Resources>
+                  <ListView.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding}"
+                                 TextWrapping="Wrap"
+                                 FontFamily="Consolas"
+                                 FontSize="14"
+                                 Foreground="White"
+                                 Margin="2" />
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </Border>
+            </Grid>
+          </PivotItem>
+
+          <PivotItem Header="Help and errors">
+            <Grid Padding="24,6,24,22">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+
+              <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="Session diagnostics"
+                             Style="{StaticResource SectionHeadingStyle}" />
+                  <TextBlock Text="If something does not work, check the latest message below. The complete log is stored in the app's local data."
+                             Style="{StaticResource HelpfulTextStyle}"
+                             Margin="0,3,16,0" />
+                </StackPanel>
+                <AppBarButton Grid.Column="1"
+                              Label="Clear messages"
+                              Icon="Delete"
+                              Foreground="White"
+                              Click="ClearErrors_Click"
+                              HorizontalAlignment="Right" />
+              </Grid>
+
+              <Border Grid.Row="1"
+                      Background="#CC081A2D"
+                      BorderBrush="{StaticResource DividerBrush}"
+                      BorderThickness="1"
+                      CornerRadius="5"
+                      Padding="8">
+                <ListView x:Name="errorsList"
+                          Background="Transparent"
+                          Margin="0"
+                          MinHeight="115"
+                          MaxHeight="230">
+                  <ListView.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="4,5">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="4" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Background="#FFE57373"
+                                CornerRadius="2"
+                                Margin="0,1,10,1" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding}"
+                                   TextWrapping="Wrap"
+                                   FontFamily="Consolas"
+                                   Foreground="#FFFFC7C7" />
+                      </Grid>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </Border>
+            </Grid>
+          </PivotItem>
+        </Pivot>
+      </StackPanel>
     </Grid>
   </Grid>
 </Page>

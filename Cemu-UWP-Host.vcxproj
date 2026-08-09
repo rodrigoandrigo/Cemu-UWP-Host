@@ -121,7 +121,7 @@
          itself may still be built with Debug symbols. -->
     <CemuBinaryName>Cemu_release</CemuBinaryName>
     <AppInstallerUri>C:\Users\rodri\Dev1\Projetos\Mteste2</AppInstallerUri>
-    <AppxSymbolPackageEnabled>True</AppxSymbolPackageEnabled>
+    <AppxSymbolPackageEnabled>False</AppxSymbolPackageEnabled>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <Link>

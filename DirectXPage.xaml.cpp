@@ -215,8 +215,8 @@ void DirectXPage::InitializeEmulator(float width, float height)
 			});
 			if (!m_main->Start())
 			{
-				AppendError("Falha ao inicializar o Cemu ou o backend Direct3D 11.");
-				launchStatus->Text = "Falha ao inicializar o emulador";
+				AppendError("Failed to initialize Cemu or the Direct3D 11 backend.");
+				launchStatus->Text = "Failed to initialize the emulator";
 				m_main.reset();
 			}
 		}
@@ -340,7 +340,7 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 		page->m_libraryBusy = true;
 		page->SetLibraryActionsEnabled(false);
 		page->startButton->IsEnabled = false;
-		page->launchStatus->Text = "Importando graphic packs...";
+		page->launchStatus->Text = "Importing graphic packs...";
 		const uint64_t selectedTitleId = page->m_selectedTitleId;
 		std::vector<uint64_t> titleIds;
 		if (selectedTitleId)
@@ -370,16 +370,16 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 			page->SetLibraryActionsEnabled(true);
 			if (!result.first)
 			{
-				page->launchStatus->Text = "Falha ao importar graphic packs; veja a aba Erros";
+				page->launchStatus->Text = "Failed to import graphic packs; see Help and errors";
 				page->SetTabsVisible(true);
 				page->toolTabs->SelectedIndex = 1;
 				page->UpdateStartButton();
 				return;
 			}
 			std::ostringstream status;
-			status << result.first << " graphic pack(s) importado(s)";
+			status << result.first << " graphic pack(s) imported";
 			if (result.second)
-				status << "; " << result.second << " ajustado(s) pela política segura";
+				status << "; " << result.second << " adjusted by the safe policy";
 			page->launchStatus->Text = FromUtf8(status.str());
 			page->RefreshLibrary();
 		}, task_continuation_context::use_current());
@@ -417,13 +417,13 @@ void DirectXPage::InstalledGames_SelectionChanged(Platform::Object^,
 				if (restoredIndex >= 0 && installedGamesList->SelectedIndex != restoredIndex)
 					installedGamesList->SelectedIndex = restoredIndex;
 				if (restoredIndex >= 0)
-					launchStatus->Text = "Pronto para iniciar";
+					launchStatus->Text = "Ready to start";
 				UpdateStartButton();
 			})));
 	}
 	else if (committedIndex >= 0)
 	{
-		launchStatus->Text = "Pronto para iniciar";
+		launchStatus->Text = "Ready to start";
 	}
 	UpdateStartButton();
 }
@@ -447,7 +447,7 @@ void DirectXPage::InstalledGames_ItemClick(Platform::Object^,
 		// Commit before assigning SelectedIndex. SelectionChanged can run
 		// synchronously and must already see the new title as authoritative.
 		installedGamesList->SelectedIndex = static_cast<int>(index);
-		launchStatus->Text = "Pronto para iniciar";
+		launchStatus->Text = "Ready to start";
 		UpdateStartButton();
 		break;
 	}
@@ -468,8 +468,8 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 		TryConfigureDefaultGamepad();
 		if (!m_gamepadProfileReady)
 		{
-			launchStatus->Text = "N\xC3\xA3" "o foi poss\xC3\xAD" "vel preparar o perfil do Controle Xbox";
-			AppendError("O perfil Wii U GamePad n\xC3\xA3" "o foi conclu\xC3\xAD" "do antes de iniciar o jogo.");
+			launchStatus->Text = "Could not prepare the Xbox Controller profile";
+			AppendError("The Wii U GamePad profile was not ready before starting the game.");
 			UpdateGamepadStatus();
 			return;
 		}
@@ -483,7 +483,7 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 	// LaunchInstalledTitle() starts Cemu title threads before its task
 	// continuation runs, so block profile replacement from this point onward.
 	m_gameRunning = true;
-	launchStatus->Text = "Montando jogo, atualização e DLC...";
+	launchStatus->Text = "Mounting game, update, and DLC...";
 	emulatorPlaceholder->Visibility = CollapsedValue;
 	FocusEmulatorInput();
 	create_task([this, titleId]()
@@ -498,14 +498,14 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 		{
 			m_gameRunning = true;
 			UpdateGamepadStatus();
-			launchStatus->Text = "Jogo em execução";
+			launchStatus->Text = "Game running";
 			FocusEmulatorInput();
 		}
 		else
 		{
 			m_gameRunning = false;
-			launchStatus->Text = "Não foi possível iniciar o jogo instalado";
-			AppendError("Não foi possível montar o jogo base com a atualização e o DLC instalados.");
+			launchStatus->Text = "Could not start the installed game";
+			AppendError("Could not mount the base game with the installed update and DLC.");
 			SetLibraryActionsEnabled(true);
 			UpdateStartButton();
 			emulatorPlaceholder->Visibility = VisibleValue;
@@ -529,7 +529,7 @@ void DirectXPage::BeginInstall()
 		page->m_libraryBusy = true;
 		page->SetLibraryActionsEnabled(false);
 		page->startButton->IsEnabled = false;
-		page->launchStatus->Text = "Instalando conteúdo...";
+		page->launchStatus->Text = "Installing content...";
 		const auto main = page->m_main;
 		create_task([main, folder]()
 		{
@@ -545,11 +545,11 @@ void DirectXPage::BeginInstall()
 			page->SetLibraryActionsEnabled(true);
 			if (!installedBaseTitleId)
 			{
-				page->launchStatus->Text = "Falha na instalação";
+				page->launchStatus->Text = "Installation failed";
 				page->UpdateStartButton();
 				return;
 			}
-			page->launchStatus->Text = "Instalação concluída";
+			page->launchStatus->Text = "Installation complete";
 			page->RefreshLibrary();
 		}, task_continuation_context::use_current());
 	}, task_continuation_context::use_current());
@@ -562,7 +562,7 @@ void DirectXPage::RefreshLibrary()
 	m_libraryBusy = true;
 	SetLibraryActionsEnabled(false);
 	startButton->IsEnabled = false;
-	launchStatus->Text = "Atualizando biblioteca...";
+	launchStatus->Text = "Refreshing library...";
 	create_task([this]()
 	{
 		return m_main ? m_main->GetInstalledTitles() : std::vector<InstalledTitle>{};
@@ -576,20 +576,20 @@ void DirectXPage::RefreshLibrary()
 			line << title.name << "\nTitle ID: "
 				<< std::uppercase << std::hex << std::setw(16)
 				<< std::setfill('0') << title.titleId << std::dec
-				<< "  |  Versão: v" << title.effectiveVersion
+				<< "  |  Version: v" << title.effectiveVersion
 				<< " (base v" << title.baseVersion;
 			if (title.updateVersion)
-				line << ", atualização v" << title.updateVersion;
+				line << ", update v" << title.updateVersion;
 			else
-				line << ", sem atualização";
+				line << ", no update";
 			line << ")  |  DLC: ";
 			if (title.dlcCount)
-				line << title.dlcCount << " instalado(s), v" << title.dlcVersion;
+				line << title.dlcCount << " installed, v" << title.dlcVersion;
 			else
-				line << "não instalado";
-			line << "  |  Região: " << title.regionName
+				line << "not installed";
+			line << "  |  Region: " << title.regionName
 				<< "  |  Graphic packs: " << title.enabledGraphicPackCount
-				<< "/" << title.compatibleGraphicPackCount << " ativos";
+				<< "/" << title.compatibleGraphicPackCount << " active";
 			installedGamesList->Items->Append(FromUtf8(line.str()));
 		}
 		const int restoredIndex = FindInstalledTitleIndex(m_selectedTitleId);
@@ -599,8 +599,8 @@ void DirectXPage::RefreshLibrary()
 		m_libraryBusy = false;
 		SetLibraryActionsEnabled(true);
 		launchStatus->Text = m_installedTitles.empty()
-			? "Nenhum jogo instalado"
-			: (restoredIndex >= 0 ? "Pronto para iniciar" : "Selecione um jogo instalado");
+			? "No games installed"
+			: (restoredIndex >= 0 ? "Ready to start" : "Select an installed game");
 		UpdateStartButton();
 	}, task_continuation_context::use_current());
 }
@@ -688,7 +688,7 @@ void DirectXPage::UpdateEmulatorSurfaceSize(float width, float height)
 void DirectXPage::SetTabsVisible(bool visible)
 {
 	tabsPanel->Visibility = visible ? VisibleValue : CollapsedValue;
-	toggleTabsButton->Label = visible ? "Ocultar abas" : "Mostrar abas";
+	toggleTabsButtonText->Text = visible ? "Hide options" : "Show options";
 	if (!visible && m_gameRunning)
 		FocusEmulatorInput();
 }
@@ -716,7 +716,7 @@ void DirectXPage::OnCemuStateChanged(CemuEmbedState state)
 			m_cemuReady = state == CEMU_EMBED_STATE_READY;
 			if (state == CEMU_EMBED_STATE_READY)
 			{
-				launchStatus->Text = "Carregando biblioteca...";
+				launchStatus->Text = "Loading library...";
 				SetLibraryActionsEnabled(true);
 				m_gamepadRetryFrames = 59;
 				UpdateActiveAccount();
@@ -724,11 +724,11 @@ void DirectXPage::OnCemuStateChanged(CemuEmbedState state)
 				RefreshLibrary();
 			}
 			else if (state == CEMU_EMBED_STATE_INITIALIZING)
-				launchStatus->Text = "Emulador inicializando...";
+				launchStatus->Text = "Initializing emulator...";
 			else if (state == CEMU_EMBED_STATE_FAILED)
 			{
-				launchStatus->Text = "Falha ao inicializar o emulador";
-				accountStatus->Text = "Conta indisponível";
+				launchStatus->Text = "Failed to initialize the emulator";
+				accountStatus->Text = "Account unavailable";
 			}
 			if (state != CEMU_EMBED_STATE_READY)
 			{
@@ -841,23 +841,23 @@ void DirectXPage::UpdateGamepadStatus()
 {
 	if (!m_gamepad)
 	{
-		controllerStatus->Text = "Controle desconectado";
+		controllerStatus->Text = "Controller disconnected";
 		controllerStatus->Opacity = 0.65;
 		m_gamepadProfileReady = false;
 		return;
 	}
 	std::wostringstream text;
-	text << L"Controle Xbox conectado";
+	text << L"Xbox Controller connected";
 	if (m_gamepadProfileReady)
 	{
-		text << L" \u2022 perfil Wii U GamePad";
+		text << L" \u2022 Wii U GamePad profile";
 		if (m_virtualMouseEnabled)
-			text << L" \u2022 mouse virtual ativo (A: clique)";
+			text << L" \u2022 virtual mouse active (A: click)";
 		else if (m_gameRunning)
-			text << L" \u2022 L+R: mouse virtual";
+			text << L" \u2022 L+R: virtual mouse";
 	}
 	else
-		text << L" \u2022 preparando perfil";
+		text << L" \u2022 preparing profile";
 	controllerStatus->Text = ref new Platform::String(text.str().c_str());
 	controllerStatus->Opacity = 1.0;
 }
@@ -916,13 +916,13 @@ void DirectXPage::UpdateActiveAccount()
 	ActiveAccount account;
 	if (!m_main || !m_main->GetActiveAccount(account))
 	{
-		accountStatus->Text = "Conta indisponível";
+		accountStatus->Text = "Account unavailable";
 		accountStatus->Opacity = 0.65;
 		return;
 	}
 
 	std::ostringstream text;
-	text << "Conta: " << (account.miiName.empty() ? "default" : account.miiName)
+	text << "Account: " << (account.miiName.empty() ? "default" : account.miiName)
 		<< " (" << std::uppercase << std::hex << std::setw(8)
 		<< std::setfill('0') << account.persistentId << ")";
 	if (account.onlineEnabled)
@@ -957,7 +957,7 @@ void DirectXPage::OnBrokeredProgress(uint64_t bytesCopied, uint64_t totalBytes, 
 	const double copiedGiB = static_cast<double>(bytesCopied) / (1024.0 * 1024.0 * 1024.0);
 	const double totalGiB = static_cast<double>(totalBytes) / (1024.0 * 1024.0 * 1024.0);
 	const double percent = totalBytes ? (100.0 * static_cast<double>(bytesCopied) / static_cast<double>(totalBytes)) : 0.0;
-	status << "Copiando título: " << std::fixed << std::setprecision(1) << percent
+	status << "Copying title: " << std::fixed << std::setprecision(1) << percent
 		<< "% (" << std::setprecision(2) << copiedGiB << " / " << totalGiB << " GiB)";
 	auto text = FromUtf8(status.str());
 	create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Normal,

@@ -4,19 +4,54 @@ Cemu UWP Host is a Universal Windows Platform front end for running the Cemu Wii
 
 This project is experimental. The native Direct3D 11 renderer and the UWP-specific Cemu integration are under active development and do not yet provide the same compatibility as the upstream desktop Vulkan renderer.
 
+## Current development status
+
+### Series S memory policy
+
+Developer Mode gives the packaged title a constrained memory budget. The renderer therefore uses fixed safety thresholds below the approximately 5120 MB process limit observed on the Series S:
+
+| Process commit | Current behavior |
+| --- | --- |
+| Below **3840 MB** | Deferred shader compilation may resume. |
+| **3968 MB** | Hysteresis release threshold for leaving the memory-pressure state. |
+| **4096 MB** | Stop/defer new shader and driver-pipeline work and run the memory guard. |
+
+These values are the current tested policy and should not be increased without new Series S measurements. They are deliberately lower than the platform limit so D3D11On12, `xbsc_xs.dll`, XAML, audio, and other process allocations retain headroom.
+
+Current renderer memory work includes:
+
+- A reusable **4 MB dynamic index ring**, with GPU retirement before wrapping, instead of retaining a separate native allocation for every indexed draw.
+- Reusable uniform and cache-copy buffers, with reconstructible scratch allocations released under memory pressure.
+- Texture trimming, transient-buffer release, GPU retirement, DXGI trimming, and heap compaction when the guard is active.
+- Serialized shader translation/native pipeline creation and retryable shader failures when compilation is deferred by memory pressure.
+
+### Graphics compatibility status
+
+Recent work has hardened index decoding, programmable primitive restart, little-endian index formats, vertex-range validation, input-layout caching, GPU-side buffer-cache copies, and stream-output/rasterization ordering. These changes substantially reduce stale-buffer corruption and long stretched polygons, but they do **not** establish complete compatibility.
+
+Known areas still under validation include:
+
+- Title-specific geometry and texture artifacts, especially in previously unseen areas or after extended gameplay.
+- Arbitrary Wii U geometry shaders that require a D3D11 compatibility fallback.
+- Stream-output-heavy effects and less common GX2 primitive or vertex formats.
+- Long-session stability while new shaders and D3D11On12 pipelines continue to appear.
+- Graphic packs that assume Vulkan behavior or use executable modifications outside the host's safe policy.
+
+Testing should be performed on the Series S with the same game area revisited after each change. When reporting a regression, include the full `LocalState\log.txt`, a screenshot or video, the approximate runtime before the issue, and whether the area had already compiled its shaders.
+
 ## Features
 
 - Native Direct3D 11 rendering inside a XAML `SwapChainPanel`.
-- No Vulkan loader, DZN driver, or Vulkan ICD files in the application package.
 - Embedded Cemu lifecycle through `CemuEmbed_Create`, surface configuration, asynchronous initialization, pumping, and shutdown.
 - Brokered folder access through the UWP folder picker without `broadFileSystemAccess`.
 - Chunked copying for large games and graphic packs.
 - A unified installer that automatically identifies an extracted base game, update, or DLC.
 - Installed-game library with title name, Title ID, version, update, DLC, region, and graphic-pack information.
+- Persistent library selection on Xbox: the D-pad moves focus, while `A` explicitly confirms a title and keeps it selected.
 - Automatic mounting of an installed base game together with its update and DLC.
 - Import and safe activation of Cemu graphic packs.
 - Active-account information in the top command bar.
-- Automatic Xbox controller discovery through `Windows.Gaming.Input::Gamepad` and SDL3-UWP.
+- Xbox controller discovery on the XAML apartment through `Windows.Gaming.Input::Gamepad`, with plain input snapshots forwarded to Cemu. SDL3-UWP remains statically integrated without passing apartment-affine WinRT objects to Cemu threads.
 - Automatic player-one Wii U GamePad profile.
 - GamePad virtual mouse:
   - Press the left and right shoulder buttons together to enable or disable it.
@@ -24,7 +59,6 @@ This project is experimental. The native Direct3D 11 renderer and the UWP-specif
   - Press `A` for the left mouse button.
   - The captured controls are hidden from the emulated game while the mouse is active.
 - XAudio 2.8 audio output for UWP.
-- In-application error and diagnostic view.
 
 ## Repository layout
 
@@ -46,13 +80,13 @@ The following MSBuild properties can be overridden if a different layout is used
 
 ## Requirements
 
-- Windows 10 or Windows 11 with Developer Mode enabled.
-- Visual Studio 18 2026 with the MSVC C++ toolchain and UWP C++ tools.
+- A Windows 10 version 1903 (`10.0.18362.0`) or newer build PC. Developer Mode is required on the Xbox deployment target, not merely to compile the solution.
+- Visual Studio 18 2026 with the MSVC v145 C++ toolchain and UWP C++ tools.
 - Windows SDK `10.0.26100.0`.
-- CMake available from the Developer PowerShell environment.
+- CMake `3.21.1` or newer, using the native/Visual Studio copy rather than MSYS2 CMake for the MSVC generator.
 - A local checkout of the modified Cemu source tree.
 - A local checkout of SDL3-UWP.
-- An x64 Direct3D 11-capable GPU and current graphics drivers.
+- An x64 Direct3D 11-capable Windows system for desktop diagnostics validation target.
 
 The host project contains Win32 and ARM64 configurations inherited from the original template, but the embedded Cemu runtime and packaged payload are currently configured for **x64**.
 
@@ -74,6 +108,8 @@ cmake -S . -B build-msvc-d3d11 `
 ```
 
 Use the native Visual Studio/CMake executable for this configuration. Do not configure the MSVC build with the MSYS2 UCRT64 copy of CMake.
+
+`CEMU_UWP=ON` already forces the Direct3D 11 backend on; `ENABLE_D3D11=ON` is kept in the example to make the intended renderer explicit.
 
 The first configuration may take some time because vcpkg builds the required static dependencies.
 
@@ -111,6 +147,8 @@ Set-Location C:\path\to\Cemu-UWP-Host
 
 The Debug host intentionally links and packages the Release Cemu runtime. To build a Release package, change `Configuration=Debug` to `Configuration=Release`.
 
+The project always produces an **x64** application bundle and signs development packages with `Cemu-UWP-Host_TemporaryKey.pfx`. Install or trust the matching certificate as required when deploying through Xbox Device Portal. Replace the development signing identity and override or remove the project-specific `AppInstallerUri` before redistributing packages. The current package manifest version is `1.0.3.0`.
+
 For a non-default repository layout, pass explicit paths:
 
 ```powershell
@@ -138,15 +176,24 @@ Only use game files that you legally own and have extracted yourself. This proje
 
 ### Starting an installed title
 
-1. Select a title from the installed-game list.
-2. Review its displayed version, update, DLC, region, and graphic-pack state.
-3. Select **Start game**.
+With an Xbox controller:
+
+1. Use the D-pad to move focus through the installed-game list.
+2. Press `A` to confirm the focused title. The confirmed title remains selected while the D-pad is used to navigate to other controls.
+3. Move focus to **Start game** and press `A`.
+
+With a pointer or mouse:
+
+1. Click a title in the installed-game list to confirm it.
+2. Select **Start game**.
+
+Before launching, review the selected title's displayed version, update, DLC, region, and graphic-pack state.
 
 The tool tabs collapse when the title starts. They can be shown again from the top command bar without resizing the emulator surface.
 
 ### Importing graphic packs
 
-1. Select a game in the library, or leave the selection empty to scan for all installed titles.
+1. Confirm a game in the library to restrict the policy to that title. If no title has been confirmed since launch, the policy scans all installed titles.
 2. Select **Import graphicPacks**.
 3. Choose either a `graphicPacks` directory or a parent directory containing one.
 
@@ -154,7 +201,13 @@ Files are copied in chunks into the application's persistent `graphicPacks` dire
 
 ### Controller and virtual mouse
 
-Xbox-compatible controllers are detected automatically. When Cemu is ready, the host creates a player-one Wii U GamePad profile if a configured profile does not already exist.
+Xbox-compatible controllers are detected automatically by the host on the XAML apartment. The host captures plain input snapshots and forwards them through `CemuEmbed_SetHostGamepadState`; WinRT controller objects do not cross into Cemu worker threads. When Cemu is ready, the host creates a player-one Wii U GamePad profile if a configured profile does not already exist.
+
+Before a game starts:
+
+- Use the D-pad to navigate the XAML interface.
+- Press `A` on a library item to confirm that game.
+- Moving focus with the D-pad does not change the confirmed game. Press `A` on another library item to replace the selection.
 
 While a game is running:
 
@@ -167,19 +220,23 @@ The command bar reports controller connection, profile, virtual-mouse, and activ
 
 ## Application data
 
-Cemu configuration, the MLC, saves, accounts, logs, shader caches, installed titles, and imported graphic packs are stored in the UWP package data directories, primarily:
+The host maps Cemu's writable paths to the UWP package directories as follows:
+
+| Package location | Contents |
+| --- | --- |
+| `LocalState` | `settings.xml`, the MLC (`mlc01`), saves, accounts, installed content, `log.txt`, imported graphic packs, and D3D11 native/SPIR-V driver caches. |
+| `LocalCache` | Transferable and precompiled Cemu shader caches plus temporary brokered-copy staging data. |
+| `InstalledLocation` | Read-only packaged payload such as `Cemu_release.dll`, `resources`, and `gameProfiles`. |
+
+On a Windows diagnostic installation, package data is normally rooted under:
 
 ```text
-%LOCALAPPDATA%\Packages\<package-family-name>\LocalState
+%LOCALAPPDATA%\Packages\<package-family-name>\
 ```
 
-Temporary brokered-copy staging data is stored under the package's `LocalCache` directory. Resetting or uninstalling the application can remove package-local data, so back up important saves before doing so.
+Resetting or uninstalling the application can remove both `LocalState` and `LocalCache`, so back up important saves before doing so. Driver and transferable shader caches are intentionally separate and should not be treated as interchangeable files.
 
 ## Troubleshooting
-
-### `LNK1181: cannot open Cemu_release.lib`
-
-Build the `CemuBin` target in Release mode first and verify that both `Cemu_release.dll` and `Cemu_release.lib` exist under `Cemu\bin`.
 
 ### Missing `CafeCn.ttf`
 
@@ -193,19 +250,15 @@ Verify that the selected folder is an extracted title with valid XML metadata in
 
 Wait until the command bar reports **Wii U GamePad profile**. Reconnect the controller if profile creation was interrupted. When the virtual mouse is active, `A`, both shoulder buttons, and the left thumbstick are intentionally reserved for mouse control.
 
+### The selected game changes while navigating with the D-pad
+
+The library distinguishes focus from confirmation. Move focus with the D-pad and press `A` on the intended game once. The selected game should remain fixed while you navigate to **Start game**. To select a different game, focus it and press `A` again.
+
 ### Rendering artifacts or unsupported shaders
 
 The Direct3D 11 backend translates Wii U shaders through GLSL/SPIR-V/HLSL compatibility paths and is still experimental. Some titles, graphic packs, arbitrary geometry shaders, mutable format aliases, or sampler swizzles may still behave differently from Vulkan.
 
 Check the **Errors** tab and the package `LocalState\log.txt` file for detailed diagnostics.
-
-## Current limitations
-
-- x64 is the only configured embedded-runtime/package architecture.
-- Direct3D 11 game compatibility is incomplete compared with upstream Vulkan.
-- Online functionality requires the user's own valid console-derived files and is not configured by this host.
-- Some desktop Cemu features and configuration dialogs are not exposed in the UWP interface.
-- UWP sandbox restrictions require selected content to be copied into package-managed storage before Cemu can use normal filesystem access.
 
 ## Project structure
 
@@ -214,9 +267,8 @@ Check the **Errors** tab and the package `LocalState\log.txt` file for detailed 
 - `Common/DeviceResources.cpp`: Direct3D device and XAML swap-chain setup.
 - `Cemu/CemuEmbed.h` in the adjacent Cemu source tree: public embedded-runtime ABI.
 - `Package.appxmanifest`: UWP identity, capabilities, and visual assets.
+- `LICENSE`: Apache License 2.0 terms for this host repository.
 
 ## License and third-party software
 
-Cemu is separate software distributed under the Mozilla Public License 2.0; see `Cemu/LICENSE.txt` in the adjacent source tree. SDL and other dependencies retain their respective licenses. Review all applicable licenses before redistributing a binary package.
-
-This host repository should include its own explicit license before it is published or redistributed independently.
+The Cemu UWP Host source in this repository is licensed under the Apache License 2.0; see `LICENSE`. Cemu is separate software distributed under the Mozilla Public License 2.0; see `Cemu/LICENSE.txt` in the adjacent source tree. SDL and other dependencies retain their respective licenses. Review all applicable notices before redistributing a binary package.
