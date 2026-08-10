@@ -45,6 +45,7 @@ Testing should be performed on the Series S with the same game area revisited af
 - Embedded Cemu lifecycle through `CemuEmbed_Create`, surface configuration, asynchronous initialization, pumping, and shutdown.
 - Brokered folder access through the UWP folder picker without `broadFileSystemAccess`.
 - Chunked copying for large games and graphic packs.
+- Platform-assisted `StorageFile.CopyAsync` installation on Xbox, with automatic fallback to bounded sequential buffers when a storage provider does not support direct copying.
 - A unified installer that automatically identifies an extracted base game, update, or DLC.
 - Installed-game library with title name, Title ID, version, update, DLC, region, and graphic-pack information.
 - Persistent library selection on Xbox: the D-pad moves focus, while `A` explicitly confirms a title and keeps it selected.
@@ -59,6 +60,7 @@ Testing should be performed on the Series S with the same game area revisited af
   - Press `A` for the left mouse button.
   - The captured controls are hidden from the emulated game while the mouse is active.
 - XAudio 2.8 audio output for UWP.
+- A top-bar toggle for Cemu's native FPS, draw-call, CPU, RAM, and VRAM performance overlay.
 
 ## Repository layout
 

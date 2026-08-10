@@ -51,6 +51,7 @@ namespace Cemu_UWP_Host
 		bool EnsureDefaultGamepadProfile();
 		bool SetGamepadState(const CemuEmbedGamepadState& state);
 		bool SetVirtualMouse(int x, int y, bool leftDown, bool enabled);
+		bool SetPerformanceMetrics(bool enabled);
 		void SetDiagnosticCallback(std::function<void(const std::string&)> callback);
 		void SetStateCallback(std::function<void(CemuEmbedState)> callback);
 		void SetProgressCallback(std::function<void(uint64_t, uint64_t, const std::string&)> callback);

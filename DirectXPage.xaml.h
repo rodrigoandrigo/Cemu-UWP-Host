@@ -33,6 +33,7 @@ namespace Cemu_UWP_Host
 		void InstalledGames_ItemClick(Platform::Object^ sender,
 			Windows::UI::Xaml::Controls::ItemClickEventArgs^ args);
 		void StartGame_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void ToggleMetrics_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void ToggleTabs_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void ClearErrors_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void EmulatorViewport_PointerPressed(Platform::Object^ sender,
@@ -42,6 +43,7 @@ namespace Cemu_UWP_Host
 			Windows::UI::Xaml::Controls::SwapChainPanel^ sender,
 			Platform::Object^ args);
 		void FocusEmulatorInput();
+		void SetSystemPointerForUi(bool enabled);
 		void SetTabsVisible(bool visible);
 		void AppendError(const std::string& message);
 		void OnCemuStateChanged(CemuEmbedState state);
@@ -70,6 +72,8 @@ namespace Cemu_UWP_Host
 		// Gamepad::Gamepads on every composition frame re-enters Xbox PnP/user
 		// association code and can produce E_INVALIDARG/E_ACCESSDENIED failures.
 		Windows::Gaming::Input::Gamepad^ m_gamepad = nullptr;
+		Windows::UI::Core::CoreCursor^ m_savedSystemPointerCursor = nullptr;
+		bool m_systemPointerHidden = false;
 		bool m_cemuReady = false;
 		bool m_libraryBusy = false;
 		bool m_gamepadProfileReady = false;
@@ -77,8 +81,9 @@ namespace Cemu_UWP_Host
 		bool m_virtualMouseEnabled = false;
 		bool m_virtualMouseChordHeld = false;
 		bool m_virtualMouseLeftDown = false;
+		bool m_performanceMetricsVisible = false;
 		uint64_t m_selectedTitleId = 0;
-		bool m_selectionRestoreQueued = false;
+		bool m_restoringCommittedSelection = false;
 		// The Xbox input object belongs to the XAML apartment. Keep one snapshot
 		// per composition frame and send it to the DLL only when it changed.
 		CemuEmbedGamepadState m_lastPublishedGamepadState{};

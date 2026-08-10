@@ -48,10 +48,22 @@
     <Border Grid.Row="0"
             MinHeight="64"
             Background="{StaticResource TopBarBrush}">
-      <StackPanel Orientation="Horizontal"
-                  HorizontalAlignment="Left"
-                  VerticalAlignment="Center"
-                  Margin="18,0,24,0">
+      <!-- Keep the Xbox bar on one compact row. Controller and account details
+           remain available to code, but only their icons consume bar space. -->
+      <Grid Margin="24,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="44" />
+          <ColumnDefinition Width="44" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Column="0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center">
           <Button x:Name="toggleTabsButton"
                   Height="44"
                   Padding="12,0"
@@ -80,57 +92,90 @@
             <TextBlock Text="Start game"
                        VerticalAlignment="Center" />
           </Button>
+          <Button x:Name="metricsButton"
+                  Height="44"
+                  Padding="12,0"
+                  Background="Transparent"
+                  BorderThickness="0"
+                  Foreground="White"
+                  Click="ToggleMetrics_Click"
+                  IsEnabled="False">
+            <StackPanel Orientation="Horizontal">
+              <FontIcon Glyph="&#xE9D2;"
+                        FontSize="17"
+                        VerticalAlignment="Center"
+                        Margin="0,0,8,0" />
+              <TextBlock x:Name="metricsButtonText"
+                         Text="Show metrics"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+        </StackPanel>
 
-          <Border Width="1"
+        <Border Grid.Column="1"
+                  Width="1"
                   Height="32"
                   Background="{StaticResource DividerBrush}"
-                  Margin="10,0,22,0" />
+                  Margin="18,0" />
 
-          <Border Width="5"
+        <Grid Grid.Column="2"
+              VerticalAlignment="Center">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0"
+                  Width="5"
                   Height="34"
                   Background="{StaticResource AccentBlueBrush}"
                   CornerRadius="3"
                   Margin="0,0,12,0" />
-          <StackPanel VerticalAlignment="Center">
+          <StackPanel Grid.Column="1"
+                      VerticalAlignment="Center">
             <TextBlock Text="Status"
-                       FontSize="12"
+                       FontSize="11"
                        Foreground="{StaticResource MutedTextBrush}" />
             <TextBlock x:Name="launchStatus"
                        Text="Initializing emulator..."
-                       FontSize="16"
+                       FontSize="15"
                        FontWeight="SemiBold"
+                       TextTrimming="CharacterEllipsis"
                        Foreground="White" />
           </StackPanel>
+        </Grid>
 
-          <Border Width="1"
-                  Height="32"
-                  Background="{StaticResource DividerBrush}"
-                  Margin="22,0" />
+        <Border Grid.Column="3"
+                Width="1"
+                Height="32"
+                Background="{StaticResource DividerBrush}"
+                Margin="18,0" />
 
-          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-            <FontIcon Glyph="&#xE7FC;"
-                      FontSize="17"
-                      Foreground="{StaticResource AccentBlueBrush}"
-                      Margin="0,0,8,0" />
-            <TextBlock x:Name="controllerStatus"
-                       Text="Controller disconnected"
-                       VerticalAlignment="Center"
-                       Foreground="{StaticResource MutedTextBrush}" />
-          </StackPanel>
+        <Grid Grid.Column="4"
+              VerticalAlignment="Center"
+              HorizontalAlignment="Center"
+              ToolTipService.ToolTip="Controller status">
+          <FontIcon x:Name="controllerStatusIcon"
+                    Glyph="&#xE7FC;"
+                    FontSize="19"
+                    Foreground="{StaticResource AccentBlueBrush}" />
+          <TextBlock x:Name="controllerStatus"
+                     Text="Controller disconnected"
+                     Visibility="Collapsed" />
+        </Grid>
 
-          <StackPanel Orientation="Horizontal"
-                      VerticalAlignment="Center"
-                      Margin="24,0,0,0">
-            <FontIcon Glyph="&#xE77B;"
-                      FontSize="17"
-                      Foreground="{StaticResource AccentBlueBrush}"
-                      Margin="0,0,8,0" />
-            <TextBlock x:Name="accountStatus"
-                       Text="Account: loading..."
-                       VerticalAlignment="Center"
-                       Foreground="{StaticResource MutedTextBrush}" />
-          </StackPanel>
-      </StackPanel>
+        <Grid Grid.Column="5"
+              VerticalAlignment="Center"
+              HorizontalAlignment="Center"
+              ToolTipService.ToolTip="Account status">
+          <FontIcon x:Name="accountStatusIcon"
+                    Glyph="&#xE77B;"
+                    FontSize="19"
+                    Foreground="{StaticResource AccentBlueBrush}" />
+          <TextBlock x:Name="accountStatus"
+                     Text="Account: loading..."
+                     Visibility="Collapsed" />
+        </Grid>
+      </Grid>
     </Border>
 
     <!-- The emulator always fills the space below the command bar. The tools
@@ -289,7 +334,7 @@
                   <ListView.Resources>
                     <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#FF0D6ECA" />
                     <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#FF1689E8" />
-                    <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#332A9DF4" />
+                    <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#55366B58" />
                     <SolidColorBrush x:Key="ListViewItemForegroundSelected" Color="White" />
                   </ListView.Resources>
                   <ListView.ItemTemplate>

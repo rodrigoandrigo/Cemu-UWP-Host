@@ -225,6 +225,7 @@ void DirectXPage::InitializeEmulator(float width, float height)
 
 DirectXPage::~DirectXPage()
 {
+	SetSystemPointerForUi(true);
 	CompositionTarget::Rendering -= m_renderingToken;
 	Gamepad::GamepadAdded -= m_gamepadAddedToken;
 	Gamepad::GamepadRemoved -= m_gamepadRemovedToken;
@@ -245,6 +246,11 @@ DirectXPage::~DirectXPage()
 
 void DirectXPage::OnRendering(Platform::Object^, Platform::Object^)
 {
+	// Xbox can recreate its controller-driven system cursor while pointer mode
+	// remains Auto. Reassert the hidden cursor for every presented UI frame so
+	// it cannot reappear over a running title.
+	if (m_gameRunning)
+		SetSystemPointerForUi(false);
 	if (m_main) m_main->Pump();
 	const auto gamepadState = PublishGamepadState();
 	UpdateVirtualMouse(gamepadState);
@@ -405,21 +411,20 @@ void DirectXPage::InstalledGames_SelectionChanged(Platform::Object^,
 	// SelectionChanged is also raised while Xbox moves focus with the D-pad.
 	// That is navigation, not confirmation. Only ItemClick (Gamepad A or a
 	// pointer click) is allowed to replace m_selectedTitleId.
-	if (committedIndex >= 0 && selectedIndex != committedIndex &&
-		!m_selectionRestoreQueued)
+	if (committedIndex >= 0 && selectedIndex != committedIndex)
 	{
-		m_selectionRestoreQueued = true;
-		create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Low,
-			ref new DispatchedHandler([this]()
-			{
-				m_selectionRestoreQueued = false;
-				const int restoredIndex = FindInstalledTitleIndex(m_selectedTitleId);
-				if (restoredIndex >= 0 && installedGamesList->SelectedIndex != restoredIndex)
-					installedGamesList->SelectedIndex = restoredIndex;
-				if (restoredIndex >= 0)
-					launchStatus->Text = "Ready to start";
-				UpdateStartButton();
-			})));
+		// Xbox's controller-driven pointer can move ListView focus and cause a
+		// transient selection change. Restore the title confirmed with A in the
+		// same event so the cursor never becomes the authoritative selection.
+		if (!m_restoringCommittedSelection)
+		{
+			m_restoringCommittedSelection = true;
+			installedGamesList->SelectedIndex = committedIndex;
+			m_restoringCommittedSelection = false;
+		}
+		launchStatus->Text = "Ready to start";
+		UpdateStartButton();
+		return;
 	}
 	else if (committedIndex >= 0)
 	{
@@ -477,6 +482,9 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 	SetTabsVisible(false);
 	startButton->IsEnabled = false;
 	SetLibraryActionsEnabled(false);
+	// The controller-driven system cursor is useful for the XAML library but
+	// must disappear before game input is handed exclusively to the emulator.
+	SetSystemPointerForUi(false);
 	// Begin every title with the optional pointer disabled. Games that need a
 	// Wii U GamePad pointer can enable it with L+R; A remains its left click.
 	m_main->SetVirtualMouse(0, 0, false, false);
@@ -504,6 +512,7 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 		else
 		{
 			m_gameRunning = false;
+			SetSystemPointerForUi(true);
 			launchStatus->Text = "Could not start the installed game";
 			AppendError("Could not mount the base game with the installed update and DLC.");
 			SetLibraryActionsEnabled(true);
@@ -511,6 +520,22 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 			emulatorPlaceholder->Visibility = VisibleValue;
 		}
 	}, task_continuation_context::use_current());
+}
+
+void DirectXPage::ToggleMetrics_Click(Platform::Object^, RoutedEventArgs^)
+{
+	if (!m_main || !m_cemuReady)
+		return;
+
+	const bool show = !m_performanceMetricsVisible;
+	if (!m_main->SetPerformanceMetrics(show))
+	{
+		AppendError("Could not change the Cemu performance metrics overlay.");
+		return;
+	}
+
+	m_performanceMetricsVisible = show;
+	metricsButtonText->Text = show ? "Hide metrics" : "Show metrics";
 }
 
 void DirectXPage::BeginInstall()
@@ -640,7 +665,44 @@ void DirectXPage::FocusEmulatorInput()
 	// keyboard and controller input for Cemu.
 	toggleTabsButton->IsTabStop = false;
 	startButton->IsTabStop = false;
+	metricsButton->IsTabStop = false;
 	this->Focus(Windows::UI::Xaml::FocusState::Programmatic);
+}
+
+void DirectXPage::SetSystemPointerForUi(bool enabled)
+{
+	// Application.RequiresPointerMode can only be established during app
+	// startup on this UWP runtime. CoreWindow.PointerCursor is the supported
+	// runtime switch for hiding and restoring the controller-driven cursor.
+	if (enabled && !m_systemPointerHidden)
+		return;
+	try
+	{
+		auto window = Window::Current;
+		if (!window || !window->CoreWindow)
+			return;
+		auto coreWindow = window->CoreWindow;
+		if (enabled)
+		{
+			coreWindow->PointerCursor = m_savedSystemPointerCursor;
+			m_savedSystemPointerCursor = nullptr;
+			m_systemPointerHidden = false;
+		}
+		else
+		{
+			// Save the UI cursor only on the first transition. If Xbox recreates a
+			// cursor later, discard it instead of replacing the cursor to restore.
+			if (!m_systemPointerHidden)
+				m_savedSystemPointerCursor = coreWindow->PointerCursor;
+			if (coreWindow->PointerCursor != nullptr)
+				coreWindow->PointerCursor = nullptr;
+			m_systemPointerHidden = true;
+		}
+	}
+	catch (Platform::Exception^)
+	{
+		// Cursor visibility must never interrupt launch or shutdown.
+	}
 }
 
 void DirectXPage::EmulatorViewport_SizeChanged(Platform::Object^, SizeChangedEventArgs^ args)
@@ -714,6 +776,7 @@ void DirectXPage::OnCemuStateChanged(CemuEmbedState state)
 		ref new DispatchedHandler([this, state]()
 		{
 			m_cemuReady = state == CEMU_EMBED_STATE_READY;
+			metricsButton->IsEnabled = m_cemuReady;
 			if (state == CEMU_EMBED_STATE_READY)
 			{
 				launchStatus->Text = "Loading library...";
@@ -729,10 +792,14 @@ void DirectXPage::OnCemuStateChanged(CemuEmbedState state)
 			{
 				launchStatus->Text = "Failed to initialize the emulator";
 				accountStatus->Text = "Account unavailable";
+				accountStatusIcon->Opacity = 0.45;
 			}
 			if (state != CEMU_EMBED_STATE_READY)
 			{
 				m_gameRunning = false;
+				m_performanceMetricsVisible = false;
+				metricsButtonText->Text = "Show metrics";
+				SetSystemPointerForUi(true);
 				if (m_virtualMouseEnabled)
 					SetVirtualMouseEnabled(false);
 				SetLibraryActionsEnabled(false);
@@ -843,6 +910,7 @@ void DirectXPage::UpdateGamepadStatus()
 	{
 		controllerStatus->Text = "Controller disconnected";
 		controllerStatus->Opacity = 0.65;
+		controllerStatusIcon->Opacity = 0.45;
 		m_gamepadProfileReady = false;
 		return;
 	}
@@ -860,6 +928,7 @@ void DirectXPage::UpdateGamepadStatus()
 		text << L" \u2022 preparing profile";
 	controllerStatus->Text = ref new Platform::String(text.str().c_str());
 	controllerStatus->Opacity = 1.0;
+	controllerStatusIcon->Opacity = 1.0;
 }
 
 CemuEmbedGamepadState DirectXPage::PublishGamepadState()
@@ -918,6 +987,7 @@ void DirectXPage::UpdateActiveAccount()
 	{
 		accountStatus->Text = "Account unavailable";
 		accountStatus->Opacity = 0.65;
+		accountStatusIcon->Opacity = 0.45;
 		return;
 	}
 
@@ -929,6 +999,7 @@ void DirectXPage::UpdateActiveAccount()
 		text << " \xE2\x80\xA2 online";
 	accountStatus->Text = FromUtf8(text.str());
 	accountStatus->Opacity = 1.0;
+	accountStatusIcon->Opacity = 1.0;
 }
 
 void DirectXPage::TryConfigureDefaultGamepad()

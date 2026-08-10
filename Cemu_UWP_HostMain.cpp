@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <unordered_map>
 #include <utility>
 
 using namespace Cemu_UWP_Host;
@@ -20,6 +21,17 @@ std::string ToUtf8(Platform::String^ value)
 	if (length > 1) WideCharToMultiByte(CP_UTF8, 0, value->Data(), -1, &result[0], length, nullptr, nullptr);
 	if (!result.empty()) result.pop_back();
 	return result;
+}
+
+Platform::String^ FromUtf8(const char* value)
+{
+	if (!value || !*value) return "";
+	const auto length = MultiByteToWideChar(CP_UTF8, 0, value, -1, nullptr, 0);
+	if (length <= 1) return "";
+	std::wstring result(static_cast<size_t>(length), L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, value, -1, &result[0], length);
+	result.pop_back();
+	return ref new Platform::String(result.c_str(), static_cast<unsigned int>(result.size()));
 }
 
 struct BrokeredFile
@@ -54,7 +66,9 @@ struct CachedTitleEntry
 struct TitleInstallBroker
 {
 	std::vector<CachedTitleEntry> entries;
+	std::unordered_map<std::wstring, StorageFolder^> destinationFolders;
 	bool cacheReady{};
+	bool fastCopyDisabled{};
 	std::function<void(uint64_t, uint64_t, const std::string&)> progressCallback;
 	std::chrono::steady_clock::time_point lastProgressUpdate{};
 };
@@ -201,6 +215,57 @@ void CEMU_EMBED_CALL CachedTitleProgress(void* userData, uint64_t bytesCopied,
 	broker->progressCallback(bytesCopied, totalBytes,
 		relativePath ? relativePath : "");
 }
+
+CemuEmbedResult CEMU_EMBED_CALL CopyCachedTitleFile(void* userData, void* fileHandle,
+	const char* destinationPathUtf8)
+{
+	if (!userData || !fileHandle || !destinationPathUtf8)
+		return CEMU_EMBED_INVALID_ARGUMENT;
+	auto& broker = *static_cast<TitleInstallBroker*>(userData);
+	if (broker.fastCopyDisabled)
+		return CEMU_EMBED_INVALID_STATE;
+
+	try
+	{
+		auto brokeredFile = static_cast<BrokeredFile*>(fileHandle);
+		if (!brokeredFile->file)
+			return CEMU_EMBED_INVALID_ARGUMENT;
+		const auto destinationPath = FromUtf8(destinationPathUtf8);
+		std::wstring fullPath(destinationPath->Data(), destinationPath->Length());
+		std::replace(fullPath.begin(), fullPath.end(), L'/', L'\\');
+		const auto separator = fullPath.find_last_of(L'\\');
+		if (separator == std::wstring::npos || separator + 1 >= fullPath.size())
+			return CEMU_EMBED_INVALID_ARGUMENT;
+		const auto folderPath = fullPath.substr(0, separator);
+		const auto fileName = fullPath.substr(separator + 1);
+
+		StorageFolder^ destinationFolder = nullptr;
+		const auto cached = broker.destinationFolders.find(folderPath);
+		if (cached != broker.destinationFolders.end())
+			destinationFolder = cached->second;
+		else
+		{
+			destinationFolder = create_task(StorageFolder::GetFolderFromPathAsync(
+				ref new Platform::String(folderPath.c_str()))).get();
+			broker.destinationFolders.emplace(folderPath, destinationFolder);
+		}
+		if (!destinationFolder)
+			return CEMU_EMBED_STORAGE_FAILED;
+
+		create_task(brokeredFile->file->CopyAsync(destinationFolder,
+			ref new Platform::String(fileName.c_str()),
+			NameCollisionOption::ReplaceExisting)).get();
+		return CEMU_EMBED_OK;
+	}
+	catch (...)
+	{
+		// Some providers do not implement broker-to-app CopyAsync. Disable the
+		// fast path for the rest of this install and let Cemu use chunked reads.
+		broker.fastCopyDisabled = true;
+		broker.destinationFolders.clear();
+		return CEMU_EMBED_STORAGE_FAILED;
+	}
+}
 }
 
 Cemu_UWP_HostMain::Cemu_UWP_HostMain(HWND window, const CemuEmbedD3D11Surface& surface, int width, int height, double dpiScale)
@@ -238,7 +303,7 @@ bool Cemu_UWP_HostMain::LaunchGame(StorageFolder^ gameFolder)
 	const CemuEmbedBrokeredStorage storage{
 		sizeof(storage), CEMU_EMBED_BROKERED_STORAGE_VERSION, this,
 		EnumerateBrokeredFolder, OpenBrokeredFile, ReadBrokeredStream,
-		CloseBrokeredStream, BrokeredProgress
+		CloseBrokeredStream, BrokeredProgress, nullptr
 	};
 	return CemuEmbed_LaunchGameFromBrokeredFolder(m_instance, reinterpret_cast<void*>(gameFolder), &storage) == CEMU_EMBED_OK;
 }
@@ -252,7 +317,7 @@ bool Cemu_UWP_HostMain::InstallTitle(StorageFolder^ titleFolder,
 	const CemuEmbedBrokeredStorage storage{
 		sizeof(storage), CEMU_EMBED_BROKERED_STORAGE_VERSION, &broker,
 		EnumerateCachedTitleFolder, OpenBrokeredFile, ReadBrokeredStream,
-		CloseBrokeredStream, CachedTitleProgress
+		CloseBrokeredStream, CachedTitleProgress, CopyCachedTitleFile
 	};
 	return CemuEmbed_InstallTitleFromBrokeredFolder(m_instance,
 		reinterpret_cast<void*>(titleFolder), &storage, expectedType,
@@ -295,7 +360,7 @@ bool Cemu_UWP_HostMain::InstallGraphicPacks(StorageFolder^ graphicPacksFolder,
 	const CemuEmbedBrokeredStorage storage{
 		sizeof(storage), CEMU_EMBED_BROKERED_STORAGE_VERSION, this,
 		EnumerateBrokeredFolder, OpenBrokeredFile, ReadBrokeredStream,
-		CloseBrokeredStream, BrokeredProgress
+		CloseBrokeredStream, BrokeredProgress, nullptr
 	};
 	return CemuEmbed_InstallGraphicPacksFromBrokeredFolder(m_instance,
 		reinterpret_cast<void*>(graphicPacksFolder), &storage,
@@ -328,6 +393,12 @@ bool Cemu_UWP_HostMain::SetVirtualMouse(int x, int y, bool leftDown, bool enable
 	return m_instance &&
 		CemuEmbed_SetVirtualMouse(m_instance, x, y,
 			leftDown ? 1 : 0, enabled ? 1 : 0) == CEMU_EMBED_OK;
+}
+
+bool Cemu_UWP_HostMain::SetPerformanceMetrics(bool enabled)
+{
+	return m_instance &&
+		CemuEmbed_SetPerformanceMetrics(m_instance, enabled ? 1 : 0) == CEMU_EMBED_OK;
 }
 
 CemuEmbedResult __cdecl Cemu_UWP_HostMain::InstalledTitleFound(
@@ -403,20 +474,24 @@ CemuEmbedResult __cdecl Cemu_UWP_HostMain::OpenBrokeredFile(void*, void* fileHan
 		auto file = brokeredFile->file;
 		auto stream = create_task(file->OpenAsync(FileAccessMode::Read)).get();
 		auto reader = ref new DataReader(stream);
-		reader->InputStreamOptions = InputStreamOptions::Partial;
 
 		// The Xbox storage broker has higher per-request latency than desktop UWP.
 		// Title installation is sequential, so it can keep one next request in
 		// flight while Cemu writes the current block. Graphic-pack imports retain
 		// their original synchronous callback behavior.
 		constexpr uint64_t kPrefetchMinimumSize = 4ull * 1024 * 1024;
+		const bool useSequentialPrefetch =
+			brokeredFile->sequentialPrefetch && brokeredFile->size >= kPrefetchMinimumSize;
+		reader->InputStreamOptions = useSequentialPrefetch
+			? InputStreamOptions::None
+			: InputStreamOptions::Partial;
 		*streamHandle = new BrokeredStream{
 			stream,
 			reader,
 			nullptr,
 			0,
 			brokeredFile->size,
-			brokeredFile->sequentialPrefetch && brokeredFile->size >= kPrefetchMinimumSize
+			useSequentialPrefetch
 		};
 		return CEMU_EMBED_OK;
 	}
