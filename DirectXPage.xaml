@@ -201,22 +201,26 @@
 
       <!-- Optional in-game Wii U GamePad pointer. This is not used for XAML
            navigation; L+R toggles it only after a title has started. -->
-      <StackPanel x:Name="virtualMouseCursor"
-                  Canvas.ZIndex="30"
-                  HorizontalAlignment="Left"
-                  VerticalAlignment="Top"
-                  IsHitTestVisible="False"
-                  Background="#CC0A2A20"
-                  Padding="3"
-                  Opacity="0.95"
-                  Visibility="Collapsed">
-        <StackPanel.RenderTransform>
+      <!-- Keep the pointer hotspot at the upper-left corner. A Path is used
+           instead of the combined touch-pointer glyph so only the arrow is
+           shown over the game. -->
+      <Path x:Name="virtualMouseCursor"
+            Canvas.ZIndex="30"
+            Width="22"
+            Height="30"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            IsHitTestVisible="False"
+            Data="M 1,1 L 1,25 L 7.5,18.5 L 12.5,29 L 17,27 L 12,17 L 21,17 Z"
+            Fill="White"
+            Stroke="#FF07130F"
+            StrokeThickness="1.5"
+            Stretch="Fill"
+            Visibility="Collapsed">
+        <Path.RenderTransform>
           <TranslateTransform x:Name="virtualMouseTransform" />
-        </StackPanel.RenderTransform>
-        <FontIcon Glyph="&#xE7C9;"
-                  FontSize="28"
-                  Foreground="White" />
-      </StackPanel>
+        </Path.RenderTransform>
+      </Path>
 
       <StackPanel x:Name="tabsPanel"
                   Canvas.ZIndex="10"

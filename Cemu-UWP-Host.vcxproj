@@ -183,6 +183,10 @@
     <Link>
       <AdditionalDependencies>$(CemuBuildDir)\$(CemuBinaryName).lib; d2d1.lib; d3d11.lib; dxgi.lib; windowscodecs.lib; dwrite.lib; %(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(CemuBuildDir); %(AdditionalLibraryDirectories); $(VCInstallDir)\lib\store\amd64; $(VCInstallDir)\lib\amd64</AdditionalLibraryDirectories>
+      <!-- Series S traces reached the guard page while newbe_xs.dll compiled a
+           D3D11On12 pipeline. Reserve 128 MiB of
+           virtual address space; stack pages remain demand-committed. -->
+      <StackReserveSize>134217728</StackReserveSize>
     </Link>
     <ClCompile>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -197,6 +201,9 @@
     <Link>
       <AdditionalDependencies>$(CemuBuildDir)\$(CemuBinaryName).lib; d2d1.lib; d3d11.lib; dxgi.lib; windowscodecs.lib; dwrite.lib; %(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(CemuBuildDir); %(AdditionalLibraryDirectories); $(VCInstallDir)\lib\store\amd64; $(VCInstallDir)\lib\amd64</AdditionalLibraryDirectories>
+      <!-- Keep the Xbox driver compiler away from the observed stack guard
+           page while preserving the existing committed-memory limits. -->
+      <StackReserveSize>134217728</StackReserveSize>
     </Link>
     <ClCompile>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
