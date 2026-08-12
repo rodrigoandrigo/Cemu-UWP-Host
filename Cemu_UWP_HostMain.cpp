@@ -286,6 +286,14 @@ bool Cemu_UWP_HostMain::Start()
 	CemuEmbedCallbacks callbacks{ sizeof(callbacks), this, Log, Error, StateChanged };
 	if (CemuEmbed_Create(&config, &callbacks, &m_instance) != CEMU_EMBED_OK)
 		return false;
+	// The Xbox host has no wxWidgets USB manager, so expose Cemu's native
+	// Dimensions Toy Pad for the entire embedded session.
+	if (CemuEmbed_EnableDimensionsToypad(m_instance, 1) != CEMU_EMBED_OK)
+	{
+		CemuEmbed_Destroy(m_instance);
+		m_instance = nullptr;
+		return false;
+	}
 	CemuEmbedSurface surface{ sizeof(surface), m_window, &m_d3d11Surface, m_width, m_height, m_dpiScale };
 	if (CemuEmbed_SetSurface(m_instance, &surface) != CEMU_EMBED_OK || CemuEmbed_InitializeAsync(m_instance) != CEMU_EMBED_OK)
 	{
@@ -306,6 +314,19 @@ bool Cemu_UWP_HostMain::LaunchGame(StorageFolder^ gameFolder)
 		CloseBrokeredStream, BrokeredProgress, nullptr
 	};
 	return CemuEmbed_LaunchGameFromBrokeredFolder(m_instance, reinterpret_cast<void*>(gameFolder), &storage) == CEMU_EMBED_OK;
+}
+
+bool Cemu_UWP_HostMain::LaunchGameFile(StorageFile^ gameFile)
+{
+	if (!m_instance || !gameFile || !gameFile->Path || gameFile->Path->IsEmpty())
+		return false;
+	return LaunchGamePath(ToUtf8(gameFile->Path));
+}
+
+bool Cemu_UWP_HostMain::LaunchGamePath(const std::string& gamePath)
+{
+	return m_instance && !gamePath.empty() &&
+		CemuEmbed_LaunchGame(m_instance, gamePath.c_str()) == CEMU_EMBED_OK;
 }
 
 bool Cemu_UWP_HostMain::InstallTitle(StorageFolder^ titleFolder,
@@ -367,6 +388,13 @@ bool Cemu_UWP_HostMain::InstallGraphicPacks(StorageFolder^ graphicPacksFolder,
 		importedPackCount) == CEMU_EMBED_OK;
 }
 
+bool Cemu_UWP_HostMain::SetGraphicPacksEnabledForTitle(uint64_t baseTitleId,
+	bool enabled, uint32_t* affectedPackCount)
+{
+	return m_instance && CemuEmbed_SetGraphicPacksEnabledForTitle(m_instance,
+		baseTitleId, enabled ? 1 : 0, affectedPackCount) == CEMU_EMBED_OK;
+}
+
 bool Cemu_UWP_HostMain::ApplySafeGraphicPackPolicyForTitle(uint64_t baseTitleId,
 	uint32_t* affectedPackCount)
 {
@@ -401,6 +429,41 @@ bool Cemu_UWP_HostMain::SetPerformanceMetrics(bool enabled)
 		CemuEmbed_SetPerformanceMetrics(m_instance, enabled ? 1 : 0) == CEMU_EMBED_OK;
 }
 
+std::vector<DimensionsFigure> Cemu_UWP_HostMain::GetDimensionsFigures()
+{
+	std::vector<DimensionsFigure> figures;
+	if (m_instance)
+		CemuEmbed_EnumerateDimensionsFigures(m_instance, DimensionsFigureFound, &figures);
+	return figures;
+}
+
+bool Cemu_UWP_HostMain::PlaceDimensionsFigure(uint32_t figureId, uint8_t slot)
+{
+	return m_instance &&
+		CemuEmbed_PlaceDimensionsFigure(m_instance, figureId, slot) == CEMU_EMBED_OK;
+}
+
+bool Cemu_UWP_HostMain::RemoveDimensionsFigure(uint8_t slot)
+{
+	return m_instance &&
+		CemuEmbed_RemoveDimensionsFigure(m_instance, slot) == CEMU_EMBED_OK;
+}
+
+bool Cemu_UWP_HostMain::MoveDimensionsFigure(uint8_t sourceSlot, uint8_t destinationSlot)
+{
+	return m_instance && CemuEmbed_MoveDimensionsFigure(
+		m_instance, sourceSlot, destinationSlot) == CEMU_EMBED_OK;
+}
+
+bool Cemu_UWP_HostMain::ImportKeys(const std::vector<uint8_t>& data,
+	uint32_t* validKeyCount)
+{
+	if (!m_instance || data.empty())
+		return false;
+	return CemuEmbed_ImportKeys(m_instance, data.data(),
+		static_cast<uint32_t>(data.size()), validKeyCount) == CEMU_EMBED_OK;
+}
+
 CemuEmbedResult __cdecl Cemu_UWP_HostMain::InstalledTitleFound(
 	void* userData, const CemuEmbedInstalledTitle* title)
 {
@@ -421,6 +484,22 @@ CemuEmbedResult __cdecl Cemu_UWP_HostMain::InstalledTitleFound(
 		title->enabled_graphic_pack_count,
 		title->name_utf8 ? title->name_utf8 : "",
 		title->region_utf8 ? title->region_utf8 : ""
+	});
+	return CEMU_EMBED_OK;
+}
+
+CemuEmbedResult __cdecl Cemu_UWP_HostMain::DimensionsFigureFound(
+	void* userData, const CemuEmbedDimensionsFigure* figure)
+{
+	if (!userData || !figure ||
+		figure->struct_size < sizeof(CemuEmbedDimensionsFigure) ||
+		figure->abi_version != CEMU_EMBED_DIMENSIONS_VERSION)
+		return CEMU_EMBED_INVALID_ARGUMENT;
+	auto& figures = *static_cast<std::vector<DimensionsFigure>*>(userData);
+	figures.push_back({
+		figure->id,
+		figure->type == CEMU_EMBED_DIMENSIONS_VEHICLE_OR_GADGET,
+		figure->name_utf8 ? figure->name_utf8 : ""
 	});
 	return CEMU_EMBED_OK;
 }

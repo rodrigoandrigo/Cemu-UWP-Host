@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "DirectXPage.xaml.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -11,6 +13,7 @@ using namespace Windows::Foundation;
 using namespace Windows::Gaming::Input;
 using namespace Windows::Storage;
 using namespace Windows::Storage::Pickers;
+using namespace Windows::Storage::Streams;
 using namespace Windows::System;
 using namespace Windows::UI::Core;
 using namespace Windows::UI::Xaml;
@@ -21,6 +24,194 @@ namespace
 {
 const auto VisibleValue = static_cast<Windows::UI::Xaml::Visibility>(0);
 const auto CollapsedValue = static_cast<Windows::UI::Xaml::Visibility>(1);
+constexpr wchar_t LocalInstallFolderName[] = L"GamesToInstall";
+constexpr wchar_t LocalInstallMarkerName[] = L"cemu-installed.txt";
+constexpr wchar_t LocalGraphicPackMarkerName[] = L"cemu-graphic-pack-installed.txt";
+
+Platform::String^ WinRtString(const wchar_t* value)
+{
+	return ref new Platform::String(value);
+}
+
+std::string ToUtf8(Platform::String^ value)
+{
+	if (!value || value->IsEmpty())
+		return {};
+	const int length = WideCharToMultiByte(CP_UTF8, 0, value->Data(),
+		static_cast<int>(value->Length()), nullptr, 0, nullptr, nullptr);
+	if (length <= 0)
+		return {};
+	std::string converted(static_cast<size_t>(length), '\0');
+	WideCharToMultiByte(CP_UTF8, 0, value->Data(),
+		static_cast<int>(value->Length()), &converted[0], length, nullptr, nullptr);
+	return converted;
+}
+
+struct LocalGameFile
+{
+	uint64_t id{};
+	std::string name;
+	std::string path;
+	std::string format;
+};
+
+struct LocalInstallScanResult
+{
+	uint32_t discovered{};
+	uint32_t installed{};
+	uint32_t failed{};
+	uint32_t alreadyProcessed{};
+	uint32_t markerWarnings{};
+	uint32_t graphicPacksDiscovered{};
+	uint32_t graphicPacksImported{};
+	uint32_t graphicPackFailures{};
+	uint32_t graphicPacksAlreadyProcessed{};
+	uint32_t enabledGraphicPacks{};
+	std::vector<LocalGameFile> localGameFiles;
+};
+
+bool IsSupportedLocalGameExtension(std::string extension)
+{
+	std::transform(extension.begin(), extension.end(), extension.begin(),
+		[](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+	return extension == ".wud" || extension == ".wux" ||
+		extension == ".iso" || extension == ".wua" ||
+		extension == ".wuhb" || extension == ".rpx" ||
+		extension == ".elf";
+}
+
+uint64_t StableLocalGameId(std::string path)
+{
+	std::transform(path.begin(), path.end(), path.begin(),
+		[](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+	uint64_t hash = 1469598103934665603ull;
+	for (const unsigned char value : path)
+	{
+		hash ^= value;
+		hash *= 1099511628211ull;
+	}
+	// Real Wii U title IDs occupy the low title namespace. Reserve the high
+	// nibble for stable host-only list IDs so selection remains unambiguous.
+	return (hash & 0x0FFFFFFFFFFFFFFFull) | 0xF000000000000000ull;
+}
+
+StorageFolder^ GetOrCreateLocalInstallFolder()
+{
+	auto root = create_task(ApplicationData::Current->LocalFolder->CreateFolderAsync(
+		WinRtString(LocalInstallFolderName),
+		CreationCollisionOption::OpenIfExists)).get();
+	if (!root)
+		return nullptr;
+
+	// Keep usage instructions beside the drop folder so they are also visible
+	// to users copying content through Xbox Device Portal or an FTP client.
+	auto readmeItem = create_task(root->TryGetItemAsync(
+		WinRtString(L"README.txt"))).get();
+	if (!readmeItem)
+	{
+		auto readme = create_task(root->CreateFileAsync(
+			WinRtString(L"README.txt"),
+			CreationCollisionOption::OpenIfExists)).get();
+		create_task(FileIO::WriteTextAsync(readme,
+			WinRtString(L"Cemu local installation folder\r\n\r\n"
+			L"Copy each extracted Wii U base game, update, or DLC into its own subfolder.\r\n"
+			L"Every title folder must contain code, content, and meta.\r\n"
+			L"Graphic Pack folders are detected by their rules.txt file.\r\n"
+			L"In the app, select Scan local folder to detect and install the content.\r\n"
+			L"Successful sources receive a cemu-installed marker. Delete that marker to reinstall them.\r\n"))).get();
+	}
+	return root;
+}
+
+bool IsExtractedInstallTitle(StorageFolder^ folder)
+{
+	if (!folder)
+		return false;
+	auto code = dynamic_cast<StorageFolder^>(
+		create_task(folder->TryGetItemAsync(WinRtString(L"code"))).get());
+	auto content = dynamic_cast<StorageFolder^>(
+		create_task(folder->TryGetItemAsync(WinRtString(L"content"))).get());
+	auto meta = dynamic_cast<StorageFolder^>(
+		create_task(folder->TryGetItemAsync(WinRtString(L"meta"))).get());
+	if (!code || !content || !meta)
+		return false;
+	return dynamic_cast<StorageFile^>(
+		create_task(code->TryGetItemAsync(WinRtString(L"app.xml"))).get()) != nullptr &&
+		dynamic_cast<StorageFile^>(
+			create_task(meta->TryGetItemAsync(WinRtString(L"meta.xml"))).get()) != nullptr;
+}
+
+bool IsGraphicPackCollection(StorageFolder^ folder)
+{
+	if (!folder || !folder->Name)
+		return false;
+	const auto name = folder->Name->Data();
+	return _wcsicmp(name, L"Graphic Packs") == 0 ||
+		_wcsicmp(name, L"graphicPacks") == 0 ||
+		_wcsicmp(name, L"downloadedGraphicPacks") == 0;
+}
+
+void FindLocalInstallContent(StorageFolder^ folder,
+	std::vector<StorageFolder^>& titles, uint32_t& alreadyProcessed,
+	std::vector<StorageFolder^>& graphicPacks,
+	uint32_t& graphicPacksAlreadyProcessed,
+	std::vector<LocalGameFile>& localGameFiles)
+{
+	if (!folder)
+		return;
+	if (IsExtractedInstallTitle(folder))
+	{
+		if (create_task(folder->TryGetItemAsync(
+			WinRtString(LocalInstallMarkerName))).get())
+			++alreadyProcessed;
+		else
+			titles.emplace_back(folder);
+		// code/content/meta can contain many directories. Once a title root is
+		// recognized, do not recurse into its payload.
+		return;
+	}
+	if (IsGraphicPackCollection(folder))
+	{
+		if (create_task(folder->TryGetItemAsync(
+			WinRtString(LocalGraphicPackMarkerName))).get())
+			++graphicPacksAlreadyProcessed;
+		else
+			graphicPacks.emplace_back(folder);
+		// Import a community collection in one broker operation instead of one
+		// staging pass per rules.txt directory.
+		return;
+	}
+	if (dynamic_cast<StorageFile^>(
+		create_task(folder->TryGetItemAsync(WinRtString(L"rules.txt"))).get()))
+	{
+		if (create_task(folder->TryGetItemAsync(
+			WinRtString(LocalGraphicPackMarkerName))).get())
+			++graphicPacksAlreadyProcessed;
+		else
+			graphicPacks.emplace_back(folder);
+		// A rules.txt directory is one complete Cemu Graphic Pack. Its shader,
+		// patch, and preset subdirectories belong to that pack.
+		return;
+	}
+
+	const auto files = create_task(folder->GetFilesAsync()).get();
+	for (const auto& file : files)
+	{
+		auto extension = ToUtf8(file->FileType);
+		if (!IsSupportedLocalGameExtension(extension))
+			continue;
+		std::transform(extension.begin(), extension.end(), extension.begin(),
+			[](unsigned char value) { return static_cast<char>(std::toupper(value)); });
+		const auto path = ToUtf8(file->Path);
+		localGameFiles.push_back({ StableLocalGameId(path), ToUtf8(file->Name),
+			path, extension });
+	}
+
+	const auto children = create_task(folder->GetFoldersAsync()).get();
+	for (const auto& child : children)
+		FindLocalInstallContent(child, titles, alreadyProcessed, graphicPacks,
+			graphicPacksAlreadyProcessed, localGameFiles);
+}
 
 Platform::String^ FromUtf8(const std::string& value)
 {
@@ -253,6 +444,19 @@ void DirectXPage::OnRendering(Platform::Object^, Platform::Object^)
 		SetSystemPointerForUi(false);
 	if (m_main) m_main->Pump();
 	const auto gamepadState = PublishGamepadState();
+	constexpr uint32_t viewButton = 1u << 4;
+	constexpr uint32_t menuButton = 1u << 6;
+	const bool optionsChord = m_gameRunning &&
+		(gamepadState.buttons & viewButton) != 0 &&
+		(gamepadState.buttons & menuButton) != 0;
+	if (optionsChord && !m_optionsChordHeld)
+	{
+		const bool showOptions = tabsPanel->Visibility != VisibleValue;
+		if (showOptions)
+			toolTabs->SelectedIndex = 1;
+		SetTabsVisible(showOptions);
+	}
+	m_optionsChordHeld = optionsChord;
 	UpdateVirtualMouse(gamepadState);
 	if (++m_controllerPollFrames >= 60)
 	{
@@ -309,11 +513,11 @@ void DirectXPage::OnCoreWindowKeyDown(CoreWindow^, KeyEventArgs^ args)
 {
 	if (!args || !IsGamepadVirtualKey(args->VirtualKey))
 		return;
-	// Before launch only the D-pad controls directional UI focus. Analog-stick
-	// virtual keys are consumed so Xbox cannot switch back to pointer-like
-	// navigation. Once a title runs every gamepad key belongs exclusively to
-	// the emulated Wii U controller.
-	if (m_gameRunning || IsGamepadThumbstickNavigationKey(args->VirtualKey))
+	// While the options panel is open, projected D-pad/A keys belong to XAML and
+	// the WGI snapshot sent to Cemu is neutral. With the panel hidden, every
+	// gamepad key belongs exclusively to the emulated Wii U controller.
+	const bool optionsVisible = tabsPanel->Visibility == VisibleValue;
+	if ((m_gameRunning && !optionsVisible) || IsGamepadThumbstickNavigationKey(args->VirtualKey))
 		args->Handled = true;
 }
 
@@ -329,6 +533,122 @@ void DirectXPage::OnBackRequested(Platform::Object^, BackRequestedEventArgs^ arg
 void DirectXPage::InstallContent_Click(Platform::Object^, RoutedEventArgs^)
 {
 	BeginInstall();
+}
+
+void DirectXPage::OpenGameFile_Click(Platform::Object^, RoutedEventArgs^)
+{
+	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
+		return;
+	auto picker = ref new FileOpenPicker();
+	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
+	for (const auto extension : { L".wud", L".wux", L".iso", L".wua",
+		L".wuhb", L".rpx", L".elf" })
+		picker->FileTypeFilter->Append(ref new Platform::String(extension));
+	Platform::WeakReference weakThis(this);
+	create_task(picker->PickSingleFileAsync()).then([weakThis](StorageFile^ file)
+	{
+		auto page = weakThis.Resolve<DirectXPage>();
+		if (!page || !file) return;
+		page->m_libraryBusy = true;
+		page->SetLibraryActionsEnabled(false);
+		page->startButton->IsEnabled = false;
+		page->launchStatus->Text = "Copying selected game file...";
+		auto cache = ApplicationData::Current->LocalCacheFolder;
+		create_task(cache->CreateFolderAsync("brokered-game-files",
+			CreationCollisionOption::OpenIfExists)).then([file](StorageFolder^ folder)
+		{
+			return create_task(file->CopyAsync(folder, file->Name,
+				NameCollisionOption::ReplaceExisting));
+		}).then([weakThis](task<StorageFile^> copyTask)
+		{
+			auto page = weakThis.Resolve<DirectXPage>();
+			if (!page) return;
+			try
+			{
+				auto copiedFile = copyTask.get();
+				page->m_libraryBusy = false;
+				const auto main = page->m_main;
+				page->BeginExternalLaunch([main, copiedFile]()
+				{
+					return main && main->LaunchGameFile(copiedFile);
+				});
+			}
+			catch (Platform::Exception^ exception)
+			{
+				page->m_libraryBusy = false;
+				page->SetLibraryActionsEnabled(true);
+				page->launchStatus->Text = "Could not copy the selected game file";
+				page->AppendError("Game file copy failed: " +
+					std::to_string(exception->HResult));
+				page->UpdateStartButton();
+			}
+		}, task_continuation_context::use_current());
+	}, task_continuation_context::use_current());
+}
+
+void DirectXPage::OpenGameFolder_Click(Platform::Object^, RoutedEventArgs^)
+{
+	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
+		return;
+	auto picker = ref new FolderPicker();
+	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
+	picker->FileTypeFilter->Append("*");
+	Platform::WeakReference weakThis(this);
+	create_task(picker->PickSingleFolderAsync()).then([weakThis](StorageFolder^ folder)
+	{
+		auto page = weakThis.Resolve<DirectXPage>();
+		if (!page || !folder) return;
+		const auto main = page->m_main;
+		page->BeginExternalLaunch([main, folder]()
+		{
+			return main && main->LaunchGame(folder);
+		});
+	}, task_continuation_context::use_current());
+}
+
+void DirectXPage::ImportKeys_Click(Platform::Object^, RoutedEventArgs^)
+{
+	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
+		return;
+	auto picker = ref new FileOpenPicker();
+	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
+	picker->FileTypeFilter->Append(".txt");
+	Platform::WeakReference weakThis(this);
+	create_task(picker->PickSingleFileAsync()).then([weakThis](StorageFile^ file)
+	{
+		if (!file) return;
+		create_task(FileIO::ReadBufferAsync(file)).then([weakThis](task<IBuffer^> readTask)
+		{
+			auto page = weakThis.Resolve<DirectXPage>();
+			if (!page) return;
+			IBuffer^ buffer = nullptr;
+			try
+			{
+				buffer = readTask.get();
+			}
+			catch (Platform::Exception^ exception)
+			{
+				page->launchStatus->Text = "keys.txt could not be read";
+				page->AppendError("keys.txt read failed: " +
+					std::to_string(exception->HResult));
+				return;
+			}
+			if (!buffer || buffer->Length == 0) return;
+			auto bytes = ref new Platform::Array<uint8_t>(buffer->Length);
+			auto reader = DataReader::FromBuffer(buffer);
+			reader->ReadBytes(bytes);
+			std::vector<uint8_t> data(bytes->Data, bytes->Data + bytes->Length);
+			uint32_t validKeys{};
+			if (!page->m_main || !page->m_main->ImportKeys(data, &validKeys))
+			{
+				page->launchStatus->Text = "keys.txt was not imported";
+				page->AppendError("The selected keys.txt contains no valid 128-bit keys or could not be saved.");
+				return;
+			}
+			page->launchStatus->Text = FromUtf8(
+				"keys.txt imported: " + std::to_string(validKeys) + " valid key(s)");
+		}, task_continuation_context::use_current());
+	}, task_continuation_context::use_current());
 }
 
 void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
@@ -347,13 +667,9 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 		page->SetLibraryActionsEnabled(false);
 		page->startButton->IsEnabled = false;
 		page->launchStatus->Text = "Importing graphic packs...";
-		const uint64_t selectedTitleId = page->m_selectedTitleId;
 		std::vector<uint64_t> titleIds;
-		if (selectedTitleId)
-			titleIds.push_back(selectedTitleId);
-		else
-			for (const auto& title : page->m_installedTitles)
-				titleIds.push_back(title.titleId);
+		for (const auto& title : page->m_installedTitles)
+			titleIds.push_back(title.titleId);
 		const auto main = page->m_main;
 		create_task([main, folder, titleIds]()
 		{
@@ -364,7 +680,7 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 			for (const auto titleId : titleIds)
 			{
 				uint32_t affected{};
-				if (main->ApplySafeGraphicPackPolicyForTitle(titleId, &affected))
+				if (main->SetGraphicPacksEnabledForTitle(titleId, true, &affected))
 					enabled += affected;
 			}
 			return std::make_pair(imported, enabled);
@@ -378,14 +694,14 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 			{
 				page->launchStatus->Text = "Failed to import graphic packs; see Help and errors";
 				page->SetTabsVisible(true);
-				page->toolTabs->SelectedIndex = 1;
+				page->toolTabs->SelectedIndex = 2;
 				page->UpdateStartButton();
 				return;
 			}
 			std::ostringstream status;
 			status << result.first << " graphic pack(s) imported";
 			if (result.second)
-				status << "; " << result.second << " adjusted by the safe policy";
+				status << "; " << result.second << " enabled";
 			page->launchStatus->Text = FromUtf8(status.str());
 			page->RefreshLibrary();
 		}, task_continuation_context::use_current());
@@ -394,7 +710,7 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 
 void DirectXPage::RefreshLibrary_Click(Platform::Object^, RoutedEventArgs^)
 {
-	RefreshLibrary();
+	RefreshLibrary(true);
 }
 
 void DirectXPage::InstalledGames_SelectionChanged(Platform::Object^,
@@ -463,7 +779,18 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 	const int selectedIndex = FindInstalledTitleIndex(m_selectedTitleId);
 	if (!m_main || !m_main->IsReady() || selectedIndex < 0)
 		return;
-	const uint64_t titleId = m_installedTitles[selectedIndex].titleId;
+	const auto& selectedTitle = m_installedTitles[selectedIndex];
+	if (!selectedTitle.localGamePath.empty())
+	{
+		const auto main = m_main;
+		const auto path = selectedTitle.localGamePath;
+		BeginExternalLaunch([main, path]()
+		{
+			return main && main->LaunchGamePath(path);
+		});
+		return;
+	}
+	const uint64_t titleId = selectedTitle.titleId;
 	// Keep Windows.Gaming.Input on the XAML apartment and finish the plain
 	// Cemu profile setup before the game creates its input threads.  This is
 	// the Xbox/Durango-safe lifetime model: no WGI object crosses into Cemu.
@@ -480,6 +807,7 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 		}
 	}
 	SetTabsVisible(false);
+	SetGamePresentation(true);
 	startButton->IsEnabled = false;
 	SetLibraryActionsEnabled(false);
 	// The controller-driven system cursor is useful for the XAML library but
@@ -498,7 +826,7 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 	{
 		if (!m_main) return false;
 		uint32_t enabledPacks{};
-		m_main->ApplySafeGraphicPackPolicyForTitle(titleId, &enabledPacks);
+		m_main->SetGraphicPacksEnabledForTitle(titleId, true, &enabledPacks);
 		return m_main->LaunchInstalledTitle(titleId);
 	}).then([this](bool launched)
 	{
@@ -512,6 +840,7 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 		else
 		{
 			m_gameRunning = false;
+			SetGamePresentation(false);
 			SetSystemPointerForUi(true);
 			launchStatus->Text = "Could not start the installed game";
 			AppendError("Could not mount the base game with the installed update and DLC.");
@@ -536,6 +865,111 @@ void DirectXPage::ToggleMetrics_Click(Platform::Object^, RoutedEventArgs^)
 
 	m_performanceMetricsVisible = show;
 	metricsButtonText->Text = show ? "Hide metrics" : "Show metrics";
+}
+
+void DirectXPage::PlaceDimensionsFigure_Click(Platform::Object^, RoutedEventArgs^)
+{
+	if (!m_main || !m_cemuReady)
+		return;
+	const int figureIndex = dimensionsFigureBox->SelectedIndex;
+	const int slot = dimensionsSlotBox->SelectedIndex;
+	if (figureIndex < 0 || figureIndex >= static_cast<int>(m_dimensionsFigures.size()) ||
+		slot < 0 || slot >= 7)
+	{
+		dimensionsStatus->Text = "Choose both a figure and a Toy Pad position.";
+		return;
+	}
+
+	const auto& figure = m_dimensionsFigures[figureIndex];
+	if (!m_main->PlaceDimensionsFigure(figure.id, static_cast<uint8_t>(slot)))
+	{
+		dimensionsStatus->Text = "The virtual tag could not be placed. Check Help and errors.";
+		AppendError("Could not create or place the LEGO Dimensions virtual tag.");
+		return;
+	}
+	static constexpr const char* slotNames[] = {
+		"Left: top", "Center", "Right: top", "Left: lower 1",
+		"Left: lower 2", "Right: lower 1", "Right: lower 2"
+	};
+	dimensionsStatus->Text = FromUtf8(
+		"Placed " + figure.name + " on " + slotNames[slot] + ".");
+}
+
+void DirectXPage::RemoveDimensionsFigure_Click(Platform::Object^, RoutedEventArgs^)
+{
+	if (!m_main || !m_cemuReady)
+		return;
+	const int slot = dimensionsSlotBox->SelectedIndex;
+	if (slot < 0 || slot >= 7)
+	{
+		dimensionsStatus->Text = "Choose a Toy Pad position first.";
+		return;
+	}
+	if (!m_main->RemoveDimensionsFigure(static_cast<uint8_t>(slot)))
+	{
+		dimensionsStatus->Text = "That Toy Pad position is already empty.";
+		return;
+	}
+	static constexpr const char* slotNames[] = {
+		"Left: top", "Center", "Right: top", "Left: lower 1",
+		"Left: lower 2", "Right: lower 1", "Right: lower 2"
+	};
+	dimensionsStatus->Text = FromUtf8(
+		std::string("Removed the figure from ") + slotNames[slot] + ".");
+}
+
+void DirectXPage::MoveDimensionsFigure_Click(Platform::Object^, RoutedEventArgs^)
+{
+	if (!m_main || !m_cemuReady)
+		return;
+	const int source = dimensionsSourceSlotBox->SelectedIndex;
+	const int destination = dimensionsSlotBox->SelectedIndex;
+	if (source < 0 || source >= 7 || destination < 0 || destination >= 7)
+	{
+		dimensionsStatus->Text = "Choose source and destination Toy Pad positions.";
+		return;
+	}
+	if (!m_main->MoveDimensionsFigure(
+		static_cast<uint8_t>(source), static_cast<uint8_t>(destination)))
+	{
+		dimensionsStatus->Text = "The source position is empty or the tag could not be moved.";
+		return;
+	}
+	static constexpr const char* slotNames[] = {
+		"Left: top", "Center", "Right: top", "Left: lower 1",
+		"Left: lower 2", "Right: lower 1", "Right: lower 2"
+	};
+	dimensionsStatus->Text = FromUtf8(std::string("Moved the tag from ") +
+		slotNames[source] + " to " + slotNames[destination] + ".");
+}
+
+void DirectXPage::RefreshDimensionsFigures()
+{
+	m_dimensionsFigures.clear();
+	dimensionsFigureBox->Items->Clear();
+	if (!m_main || !m_cemuReady)
+		return;
+	m_dimensionsFigures = m_main->GetDimensionsFigures();
+	for (const auto& figure : m_dimensionsFigures)
+	{
+		const std::string type = figure.vehicleOrGadget ? "Vehicle/Gadget" : "Character";
+		dimensionsFigureBox->Items->Append(
+			FromUtf8(figure.name + "  [" + type + ", " + std::to_string(figure.id) + "]"));
+	}
+	const bool available = !m_dimensionsFigures.empty();
+	dimensionsFigureBox->IsEnabled = available;
+	dimensionsSlotBox->IsEnabled = available;
+	dimensionsSourceSlotBox->IsEnabled = available;
+	placeDimensionsFigureButton->IsEnabled = available;
+	removeDimensionsFigureButton->IsEnabled = available;
+	moveDimensionsFigureButton->IsEnabled = available;
+	if (available)
+	{
+		dimensionsFigureBox->SelectedIndex = 0;
+		dimensionsStatus->Text = "Native Toy Pad ready. Virtual tags are stored in the app's local data.";
+	}
+	else
+		dimensionsStatus->Text = "The native LEGO Dimensions catalog is unavailable.";
 }
 
 void DirectXPage::BeginInstall()
@@ -580,26 +1014,192 @@ void DirectXPage::BeginInstall()
 	}, task_continuation_context::use_current());
 }
 
-void DirectXPage::RefreshLibrary()
+void DirectXPage::BeginExternalLaunch(std::function<bool()> launchOperation)
+{
+	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning || !launchOperation)
+		return;
+	const auto gamepadState = PublishGamepadState();
+	if (gamepadState.connected)
+	{
+		TryConfigureDefaultGamepad();
+		if (!m_gamepadProfileReady)
+		{
+			launchStatus->Text = "Could not prepare the Xbox Controller profile";
+			AppendError("The Wii U GamePad profile was not ready before starting the selected title.");
+			return;
+		}
+	}
+
+	m_libraryBusy = true;
+	SetTabsVisible(false);
+	SetGamePresentation(true);
+	startButton->IsEnabled = false;
+	SetLibraryActionsEnabled(false);
+	SetSystemPointerForUi(false);
+	m_main->SetVirtualMouse(0, 0, false, false);
+	m_gameRunning = true;
+	launchStatus->Text = "Preparing selected Wii U title...";
+	emulatorPlaceholder->Visibility = CollapsedValue;
+	FocusEmulatorInput();
+	Platform::WeakReference weakThis(this);
+	create_task(std::move(launchOperation)).then([weakThis](bool launched)
+	{
+		auto page = weakThis.Resolve<DirectXPage>();
+		if (!page) return;
+		if (launched)
+		{
+			page->launchStatus->Text = "Game running";
+			page->FocusEmulatorInput();
+			return;
+		}
+		page->m_gameRunning = false;
+		page->m_libraryBusy = false;
+		page->SetGamePresentation(false);
+		page->SetSystemPointerForUi(true);
+		page->SetTabsVisible(true);
+		page->launchStatus->Text = "Could not start the selected Wii U title";
+		page->AppendError("Cemu could not mount or launch the selected game format.");
+		page->SetLibraryActionsEnabled(true);
+		page->UpdateStartButton();
+		page->emulatorPlaceholder->Visibility = VisibleValue;
+	}, task_continuation_context::use_current());
+}
+
+void DirectXPage::RefreshLibrary(bool scanLocalInstallFolder)
 {
 	if (!m_main || !m_cemuReady || m_libraryBusy)
 		return;
 	m_libraryBusy = true;
 	SetLibraryActionsEnabled(false);
 	startButton->IsEnabled = false;
-	launchStatus->Text = "Refreshing library...";
-	create_task([this]()
+	launchStatus->Text = scanLocalInstallFolder
+		? "Scanning LocalState\\GamesToInstall..."
+		: "Refreshing library...";
+	const auto main = m_main;
+	create_task([main, scanLocalInstallFolder]()
 	{
-		return m_main ? m_main->GetInstalledTitles() : std::vector<InstalledTitle>{};
-	}).then([this](std::vector<InstalledTitle> titles)
+		LocalInstallScanResult scanResult{};
+		try
+		{
+			auto importFolder = GetOrCreateLocalInstallFolder();
+			if (importFolder && main)
+			{
+				std::vector<StorageFolder^> candidates;
+				std::vector<StorageFolder^> graphicPackCandidates;
+				FindLocalInstallContent(importFolder, candidates,
+					scanResult.alreadyProcessed, graphicPackCandidates,
+					scanResult.graphicPacksAlreadyProcessed,
+					scanResult.localGameFiles);
+				scanResult.discovered = static_cast<uint32_t>(candidates.size());
+				scanResult.graphicPacksDiscovered =
+					static_cast<uint32_t>(graphicPackCandidates.size());
+				if (scanLocalInstallFolder)
+				{
+					for (const auto& candidate : candidates)
+					{
+						uint64_t baseTitleId{};
+						if (!main->InstallTitle(candidate, CEMU_EMBED_INSTALL_AUTO,
+							&baseTitleId))
+						{
+							++scanResult.failed;
+							continue;
+						}
+						++scanResult.installed;
+						try
+						{
+							auto marker = create_task(candidate->CreateFileAsync(
+								WinRtString(LocalInstallMarkerName),
+								CreationCollisionOption::ReplaceExisting)).get();
+							create_task(FileIO::WriteTextAsync(marker,
+								WinRtString(L"Installed by Cemu-UWP-Host. Delete this file to reinstall this source.\r\n"))).get();
+						}
+						catch (...)
+						{
+							// The title is already committed to the MLC. Report only the
+							// missing marker, which can cause it to be offered again.
+							++scanResult.markerWarnings;
+						}
+					}
+
+					for (const auto& graphicPack : graphicPackCandidates)
+					{
+						uint32_t imported{};
+						if (!main->InstallGraphicPacks(graphicPack, &imported) || !imported)
+						{
+							++scanResult.graphicPackFailures;
+							continue;
+						}
+						scanResult.graphicPacksImported += imported;
+						try
+						{
+							auto marker = create_task(graphicPack->CreateFileAsync(
+								WinRtString(LocalGraphicPackMarkerName),
+								CreationCollisionOption::ReplaceExisting)).get();
+							create_task(FileIO::WriteTextAsync(marker,
+								WinRtString(L"Imported by Cemu-UWP-Host. Delete this file to import this Graphic Pack again.\r\n"))).get();
+						}
+						catch (...)
+						{
+							++scanResult.markerWarnings;
+						}
+					}
+				}
+			}
+		}
+		catch (Platform::Exception^)
+		{
+			if (scanLocalInstallFolder)
+				++scanResult.failed;
+		}
+		catch (...)
+		{
+			if (scanLocalInstallFolder)
+				++scanResult.failed;
+		}
+		auto titles = main ? main->GetInstalledTitles() : std::vector<InstalledTitle>{};
+		if (main)
+		{
+			for (const auto& title : titles)
+			{
+				uint32_t affected{};
+				if (main->SetGraphicPacksEnabledForTitle(title.titleId, true,
+					&affected))
+					scanResult.enabledGraphicPacks += affected;
+			}
+			// Refresh the counters displayed by the library after changing pack
+			// state for every installed title.
+			titles = main->GetInstalledTitles();
+		}
+		return std::make_pair(std::move(titles), scanResult);
+	}).then([this, scanLocalInstallFolder](
+		std::pair<std::vector<InstalledTitle>, LocalInstallScanResult> result)
 	{
+		auto titles = std::move(result.first);
+		const auto scanResult = result.second;
+		for (const auto& localGame : scanResult.localGameFiles)
+		{
+			InstalledTitle localTitle{};
+			localTitle.titleId = localGame.id;
+			localTitle.name = localGame.name;
+			localTitle.regionName = "Local storage";
+			localTitle.localGamePath = localGame.path;
+			localTitle.localGameFormat = localGame.format;
+			titles.emplace_back(std::move(localTitle));
+		}
 		m_installedTitles = std::move(titles);
 		installedGamesList->Items->Clear();
 		for (const auto& title : m_installedTitles)
 		{
 			std::ostringstream line;
-			line << title.name << "\nTitle ID: "
-				<< std::uppercase << std::hex << std::setw(16)
+			line << title.name;
+			if (!title.localGamePath.empty())
+			{
+				line << "\nLocal game file  |  Format: " << title.localGameFormat
+					<< "  |  Ready to launch from GamesToInstall";
+				installedGamesList->Items->Append(FromUtf8(line.str()));
+				continue;
+			}
+			line << "\nTitle ID: " << std::uppercase << std::hex << std::setw(16)
 				<< std::setfill('0') << title.titleId << std::dec
 				<< "  |  Version: v" << title.effectiveVersion
 				<< " (base v" << title.baseVersion;
@@ -623,9 +1223,49 @@ void DirectXPage::RefreshLibrary()
 			m_selectedTitleId = 0;
 		m_libraryBusy = false;
 		SetLibraryActionsEnabled(true);
-		launchStatus->Text = m_installedTitles.empty()
-			? "No games installed"
-			: (restoredIndex >= 0 ? "Ready to start" : "Select an installed game");
+		if (scanLocalInstallFolder)
+		{
+			std::ostringstream status;
+			status << "Local scan complete";
+			if (scanResult.installed)
+				status << "; " << scanResult.installed << " title item(s) installed";
+			if (!scanResult.localGameFiles.empty())
+				status << "; " << scanResult.localGameFiles.size()
+					<< " local game file(s) detected";
+			if (!scanResult.discovered && !scanResult.graphicPacksDiscovered &&
+				scanResult.localGameFiles.empty())
+				status << "; no new content found";
+			if (scanResult.alreadyProcessed)
+				status << "; " << scanResult.alreadyProcessed << " already processed";
+			if (scanResult.graphicPacksImported)
+				status << "; " << scanResult.graphicPacksImported << " Graphic Pack(s) imported";
+			if (scanResult.graphicPacksAlreadyProcessed)
+				status << "; " << scanResult.graphicPacksAlreadyProcessed << " Graphic Pack(s) already processed";
+			if (scanResult.enabledGraphicPacks)
+				status << "; " << scanResult.enabledGraphicPacks << " Graphic Pack(s) enabled";
+			if (scanResult.failed)
+			{
+				status << "; " << scanResult.failed << " failed";
+				AppendError("Some content in LocalState\\GamesToInstall could not be installed. Each source must be an extracted base game, update, or DLC with code, content, and meta folders.");
+			}
+			if (scanResult.graphicPackFailures)
+			{
+				status << "; " << scanResult.graphicPackFailures << " Graphic Pack import(s) failed";
+				AppendError("Some Graphic Packs in LocalState\\GamesToInstall could not be imported. Each pack folder must contain a valid rules.txt file.");
+			}
+			if (scanResult.markerWarnings)
+			{
+				status << "; " << scanResult.markerWarnings << " marker warning(s)";
+				AppendError("Installed content could not be marked as processed and may be detected again on the next scan.");
+			}
+			launchStatus->Text = FromUtf8(status.str());
+		}
+		else
+		{
+			launchStatus->Text = m_installedTitles.empty()
+				? "No games installed"
+				: (restoredIndex >= 0 ? "Ready to start" : "Select an installed game");
+		}
 		UpdateStartButton();
 	}, task_continuation_context::use_current());
 }
@@ -634,6 +1274,9 @@ void DirectXPage::SetLibraryActionsEnabled(bool enabled)
 {
 	const bool canUse = enabled && m_cemuReady;
 	installContentButton->IsEnabled = canUse;
+	openGameFileButton->IsEnabled = canUse && !m_gameRunning;
+	openGameFolderButton->IsEnabled = canUse && !m_gameRunning;
+	importKeysButton->IsEnabled = canUse && !m_gameRunning;
 	refreshLibraryButton->IsEnabled = canUse;
 	installGraphicPacksButton->IsEnabled = canUse;
 	installedGamesList->IsEnabled = enabled;
@@ -749,10 +1392,32 @@ void DirectXPage::UpdateEmulatorSurfaceSize(float width, float height)
 
 void DirectXPage::SetTabsVisible(bool visible)
 {
+	// While a title owns the surface, no XAML chrome may cover or resize it.
+	// Options become available again only after leaving the game presentation.
+	if (m_gameRunning && visible)
+		visible = false;
 	tabsPanel->Visibility = visible ? VisibleValue : CollapsedValue;
 	toggleTabsButtonText->Text = visible ? "Hide options" : "Show options";
+	if (visible && m_gameRunning)
+		toolTabs->Focus(Windows::UI::Xaml::FocusState::Programmatic);
 	if (!visible && m_gameRunning)
 		FocusEmulatorInput();
+}
+
+void DirectXPage::SetGamePresentation(bool running)
+{
+	if (running)
+	{
+		topCommandBar->Visibility = CollapsedValue;
+		tabsPanel->Visibility = CollapsedValue;
+		Grid::SetRow(emulatorViewport, 0);
+		Grid::SetRowSpan(emulatorViewport, 2);
+		return;
+	}
+
+	topCommandBar->Visibility = VisibleValue;
+	Grid::SetRow(emulatorViewport, 1);
+	Grid::SetRowSpan(emulatorViewport, 1);
 }
 
 void DirectXPage::AppendError(const std::string& message)
@@ -785,6 +1450,7 @@ void DirectXPage::OnCemuStateChanged(CemuEmbedState state)
 				UpdateActiveAccount();
 				TryConfigureDefaultGamepad();
 				RefreshLibrary();
+				RefreshDimensionsFigures();
 			}
 			else if (state == CEMU_EMBED_STATE_INITIALIZING)
 				launchStatus->Text = "Initializing emulator...";
@@ -797,12 +1463,19 @@ void DirectXPage::OnCemuStateChanged(CemuEmbedState state)
 			if (state != CEMU_EMBED_STATE_READY)
 			{
 				m_gameRunning = false;
+				SetGamePresentation(false);
 				m_performanceMetricsVisible = false;
 				metricsButtonText->Text = "Show metrics";
 				SetSystemPointerForUi(true);
 				if (m_virtualMouseEnabled)
 					SetVirtualMouseEnabled(false);
 				SetLibraryActionsEnabled(false);
+				dimensionsFigureBox->IsEnabled = false;
+				dimensionsSlotBox->IsEnabled = false;
+				dimensionsSourceSlotBox->IsEnabled = false;
+				placeDimensionsFigureButton->IsEnabled = false;
+				removeDimensionsFigureButton->IsEnabled = false;
+				moveDimensionsFigureButton->IsEnabled = false;
 			}
 			UpdateStartButton();
 		})));
@@ -853,7 +1526,8 @@ void DirectXPage::SetVirtualMouseEnabled(bool enabled)
 
 void DirectXPage::UpdateVirtualMouse(const CemuEmbedGamepadState& gamepad)
 {
-	if (!m_gameRunning || !m_gamepadProfileReady || !gamepad.connected)
+	if (!m_gameRunning || !m_gamepadProfileReady || !gamepad.connected ||
+		tabsPanel->Visibility == VisibleValue)
 	{
 		m_virtualMouseChordHeld = false;
 		if (m_virtualMouseEnabled)
@@ -970,11 +1644,25 @@ CemuEmbedGamepadState DirectXPage::PublishGamepadState()
 		m_gamepad = nullptr;
 		m_gamepadProfileReady = false;
 	}
-	if (!m_hasPublishedGamepadState ||
-		std::memcmp(&state, &m_lastPublishedGamepadState, sizeof(state)) != 0)
+	// Do not let UI navigation also control the running Wii U title. Keep the
+	// device connected so Cemu does not rebuild its input topology; only publish
+	// a neutral reading while the options panel has focus.
+	auto publishedState = state;
+	if (m_gameRunning && tabsPanel->Visibility == VisibleValue)
 	{
-		m_main->SetGamepadState(state);
-		m_lastPublishedGamepadState = state;
+		publishedState.buttons = 0;
+		publishedState.left_x = 0.0f;
+		publishedState.left_y = 0.0f;
+		publishedState.right_x = 0.0f;
+		publishedState.right_y = 0.0f;
+		publishedState.left_trigger = 0.0f;
+		publishedState.right_trigger = 0.0f;
+	}
+	if (!m_hasPublishedGamepadState ||
+		std::memcmp(&publishedState, &m_lastPublishedGamepadState, sizeof(publishedState)) != 0)
+	{
+		m_main->SetGamepadState(publishedState);
+		m_lastPublishedGamepadState = publishedState;
 		m_hasPublishedGamepadState = true;
 	}
 	return state;

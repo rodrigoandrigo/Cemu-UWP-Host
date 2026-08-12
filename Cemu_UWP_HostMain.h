@@ -22,6 +22,8 @@ namespace Cemu_UWP_Host
 		uint32_t enabledGraphicPackCount{};
 		std::string name;
 		std::string regionName;
+		std::string localGamePath;
+		std::string localGameFormat;
 	};
 
 	struct ActiveAccount
@@ -32,6 +34,13 @@ namespace Cemu_UWP_Host
 		std::string accountId;
 	};
 
+	struct DimensionsFigure
+	{
+		uint32_t id{};
+		bool vehicleOrGadget{};
+		std::string name;
+	};
+
 	class Cemu_UWP_HostMain
 	{
 	public:
@@ -39,6 +48,8 @@ namespace Cemu_UWP_Host
 		~Cemu_UWP_HostMain();
 		bool Start();
 		bool LaunchGame(Windows::Storage::StorageFolder^ gameFolder);
+		bool LaunchGameFile(Windows::Storage::StorageFile^ gameFile);
+		bool LaunchGamePath(const std::string& gamePath);
 		bool InstallTitle(Windows::Storage::StorageFolder^ titleFolder,
 			CemuEmbedInstallType expectedType, uint64_t* installedBaseTitleId = nullptr);
 		std::vector<InstalledTitle> GetInstalledTitles();
@@ -46,12 +57,19 @@ namespace Cemu_UWP_Host
 		bool LaunchInstalledTitle(uint64_t baseTitleId);
 		bool InstallGraphicPacks(Windows::Storage::StorageFolder^ graphicPacksFolder,
 			uint32_t* importedPackCount = nullptr);
+		bool SetGraphicPacksEnabledForTitle(uint64_t baseTitleId, bool enabled,
+			uint32_t* affectedPackCount = nullptr);
 		bool ApplySafeGraphicPackPolicyForTitle(uint64_t baseTitleId,
 			uint32_t* affectedPackCount = nullptr);
 		bool EnsureDefaultGamepadProfile();
 		bool SetGamepadState(const CemuEmbedGamepadState& state);
 		bool SetVirtualMouse(int x, int y, bool leftDown, bool enabled);
 		bool SetPerformanceMetrics(bool enabled);
+		std::vector<DimensionsFigure> GetDimensionsFigures();
+		bool PlaceDimensionsFigure(uint32_t figureId, uint8_t slot);
+		bool RemoveDimensionsFigure(uint8_t slot);
+		bool MoveDimensionsFigure(uint8_t sourceSlot, uint8_t destinationSlot);
+		bool ImportKeys(const std::vector<uint8_t>& data, uint32_t* validKeyCount = nullptr);
 		void SetDiagnosticCallback(std::function<void(const std::string&)> callback);
 		void SetStateCallback(std::function<void(CemuEmbedState)> callback);
 		void SetProgressCallback(std::function<void(uint64_t, uint64_t, const std::string&)> callback);
@@ -71,6 +89,8 @@ namespace Cemu_UWP_Host
 		static void __cdecl BrokeredProgress(void* userData, uint64_t bytesCopied, uint64_t totalBytes, const char* relativePath);
 		static CemuEmbedResult __cdecl InstalledTitleFound(void* userData,
 			const CemuEmbedInstalledTitle* title);
+		static CemuEmbedResult __cdecl DimensionsFigureFound(void* userData,
+			const CemuEmbedDimensionsFigure* figure);
 		CemuEmbedInstance* m_instance = nullptr;
 		HWND m_window = nullptr;
 		CemuEmbedD3D11Surface m_d3d11Surface{};

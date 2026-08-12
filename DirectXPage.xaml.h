@@ -26,6 +26,9 @@ namespace Cemu_UWP_Host
 		void OnBackRequested(Platform::Object^ sender,
 			Windows::UI::Core::BackRequestedEventArgs^ args);
 		void InstallContent_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void OpenGameFile_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void OpenGameFolder_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void ImportKeys_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void InstallGraphicPacks_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void RefreshLibrary_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void InstalledGames_SelectionChanged(Platform::Object^ sender,
@@ -35,6 +38,9 @@ namespace Cemu_UWP_Host
 		void StartGame_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void ToggleMetrics_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void ToggleTabs_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void PlaceDimensionsFigure_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void RemoveDimensionsFigure_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void MoveDimensionsFigure_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void ClearErrors_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void EmulatorViewport_PointerPressed(Platform::Object^ sender,
 			Windows::UI::Xaml::Input::PointerRoutedEventArgs^ args);
@@ -45,23 +51,27 @@ namespace Cemu_UWP_Host
 		void FocusEmulatorInput();
 		void SetSystemPointerForUi(bool enabled);
 		void SetTabsVisible(bool visible);
+		void SetGamePresentation(bool running);
 		void AppendError(const std::string& message);
 		void OnCemuStateChanged(CemuEmbedState state);
 		void OnBrokeredProgress(uint64_t bytesCopied, uint64_t totalBytes, const std::string& relativePath);
 		void BeginInstall();
-		void RefreshLibrary();
+		void BeginExternalLaunch(std::function<bool()> launchOperation);
+		void RefreshLibrary(bool scanLocalInstallFolder = false);
 		void SetLibraryActionsEnabled(bool enabled);
 		void UpdateStartButton();
 		int FindInstalledTitleIndex(uint64_t titleId) const;
 		void UpdateGamepadStatus();
 		CemuEmbedGamepadState PublishGamepadState();
 		void UpdateActiveAccount();
+		void RefreshDimensionsFigures();
 		void TryConfigureDefaultGamepad();
 		void UpdateVirtualMouse(const CemuEmbedGamepadState& gamepad);
 		void SetVirtualMouseEnabled(bool enabled);
 		std::shared_ptr<DX::DeviceResources> m_deviceResources;
 		std::shared_ptr<Cemu_UWP_HostMain> m_main;
 		std::vector<InstalledTitle> m_installedTitles;
+		std::vector<DimensionsFigure> m_dimensionsFigures;
 		Windows::Foundation::EventRegistrationToken m_renderingToken{};
 		Windows::Foundation::EventRegistrationToken m_gamepadAddedToken{};
 		Windows::Foundation::EventRegistrationToken m_gamepadRemovedToken{};
@@ -80,6 +90,7 @@ namespace Cemu_UWP_Host
 		bool m_gameRunning = false;
 		bool m_virtualMouseEnabled = false;
 		bool m_virtualMouseChordHeld = false;
+		bool m_optionsChordHeld = false;
 		bool m_virtualMouseLeftDown = false;
 		bool m_performanceMetricsVisible = false;
 		uint64_t m_selectedTitleId = 0;

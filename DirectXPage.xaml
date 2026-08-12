@@ -45,7 +45,8 @@
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
-    <Border Grid.Row="0"
+    <Border x:Name="topCommandBar"
+            Grid.Row="0"
             MinHeight="64"
             Background="{StaticResource TopBarBrush}">
       <!-- Keep the Xbox bar on one compact row. Controller and account details
@@ -275,6 +276,14 @@
                                Style="{StaticResource HelpfulTextStyle}"
                                FontSize="13"
                                Margin="0,2,0,0" />
+                    <TextBlock Text="Open game file: WUD, WUX, ISO, WUA, WUHB, RPX, or ELF. Use Open game folder for extracted titles, NUS title.tmd content, or executables with adjacent RPL files."
+                               Style="{StaticResource HelpfulTextStyle}"
+                               FontSize="13"
+                               Margin="0,2,0,0" />
+                    <TextBlock Text="No external drive? GamesToInstall detects WUD, WUX, ISO, WUA, WUHB, RPX, ELF, extracted titles, updates, DLC, and Graphic Packs."
+                               Style="{StaticResource HelpfulTextStyle}"
+                               FontSize="13"
+                               Margin="0,2,0,0" />
                   </StackPanel>
                 </Grid>
               </Border>
@@ -303,8 +312,26 @@
                                 Foreground="White"
                                 IsEnabled="False"
                                 Click="InstallContent_Click" />
+                  <AppBarButton x:Name="openGameFileButton"
+                                Label="Open game file"
+                                Icon="OpenFile"
+                                Foreground="White"
+                                IsEnabled="False"
+                                Click="OpenGameFile_Click" />
+                  <AppBarButton x:Name="openGameFolderButton"
+                                Label="Open game folder"
+                                Icon="Folder"
+                                Foreground="White"
+                                IsEnabled="False"
+                                Click="OpenGameFolder_Click" />
+                  <AppBarButton x:Name="importKeysButton"
+                                Label="Import keys.txt"
+                                Icon="Document"
+                                Foreground="White"
+                                IsEnabled="False"
+                                Click="ImportKeys_Click" />
                   <AppBarButton x:Name="refreshLibraryButton"
-                                Label="Refresh list"
+                                Label="Scan local folder"
                                 Icon="Refresh"
                                 Foreground="White"
                                 IsEnabled="False"
@@ -352,6 +379,105 @@
                     </DataTemplate>
                   </ListView.ItemTemplate>
                 </ListView>
+              </Border>
+            </Grid>
+          </PivotItem>
+
+          <PivotItem Header="Toy Pad">
+            <Grid Padding="24,6,24,22">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+
+              <StackPanel>
+                <TextBlock Text="LEGO Dimensions Toy Pad"
+                           Style="{StaticResource SectionHeadingStyle}" />
+                <TextBlock Text="Choose a character, vehicle, or gadget and place its persistent virtual tag on the native Toy Pad. Game-written upgrades are saved automatically. Press View + Menu during a game to open or close options."
+                           Style="{StaticResource HelpfulTextStyle}"
+                           Margin="0,3,0,10" />
+              </StackPanel>
+
+              <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="2*" />
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <ComboBox x:Name="dimensionsFigureBox"
+                          Header="Figure"
+                          PlaceholderText="Choose a figure"
+                          IsEnabled="False"
+                          Margin="0,0,12,0"
+                          HorizontalAlignment="Stretch" />
+                <ComboBox x:Name="dimensionsSlotBox"
+                          Grid.Column="1"
+                          Header="Toy Pad position"
+                          SelectedIndex="1"
+                          IsEnabled="False"
+                          Margin="0,0,12,0"
+                          HorizontalAlignment="Stretch">
+                  <ComboBoxItem Content="Left: top" />
+                  <ComboBoxItem Content="Center" />
+                  <ComboBoxItem Content="Right: top" />
+                  <ComboBoxItem Content="Left: lower 1" />
+                  <ComboBoxItem Content="Left: lower 2" />
+                  <ComboBoxItem Content="Right: lower 1" />
+                  <ComboBoxItem Content="Right: lower 2" />
+                </ComboBox>
+                <Button x:Name="placeDimensionsFigureButton"
+                        Grid.Column="2"
+                        Content="Place or replace"
+                        IsEnabled="False"
+                        VerticalAlignment="Bottom"
+                        Margin="0,0,8,0"
+                        Click="PlaceDimensionsFigure_Click" />
+                <Button x:Name="removeDimensionsFigureButton"
+                        Grid.Column="3"
+                        Content="Remove"
+                        IsEnabled="False"
+                        VerticalAlignment="Bottom"
+                        Click="RemoveDimensionsFigure_Click" />
+              </Grid>
+
+              <StackPanel Grid.Row="2"
+                          Orientation="Horizontal"
+                          Margin="0,10,0,0">
+                <ComboBox x:Name="dimensionsSourceSlotBox"
+                          Header="Move existing tag from"
+                          SelectedIndex="1"
+                          IsEnabled="False"
+                          Width="250"
+                          Margin="0,0,8,0">
+                  <ComboBoxItem Content="Left: top" />
+                  <ComboBoxItem Content="Center" />
+                  <ComboBoxItem Content="Right: top" />
+                  <ComboBoxItem Content="Left: lower 1" />
+                  <ComboBoxItem Content="Left: lower 2" />
+                  <ComboBoxItem Content="Right: lower 1" />
+                  <ComboBoxItem Content="Right: lower 2" />
+                </ComboBox>
+                <Button x:Name="moveDimensionsFigureButton"
+                        Content="Move to selected position"
+                        IsEnabled="False"
+                        VerticalAlignment="Bottom"
+                        Click="MoveDimensionsFigure_Click" />
+              </StackPanel>
+
+              <Border Grid.Row="3"
+                      Background="{StaticResource CardBrush}"
+                      BorderBrush="{StaticResource DividerBrush}"
+                      BorderThickness="1"
+                      CornerRadius="5"
+                      Padding="12,9"
+                      Margin="0,12,0,0">
+                <TextBlock x:Name="dimensionsStatus"
+                           Text="The native Toy Pad will be ready when Cemu finishes initializing."
+                           Style="{StaticResource HelpfulTextStyle}" />
               </Border>
             </Grid>
           </PivotItem>

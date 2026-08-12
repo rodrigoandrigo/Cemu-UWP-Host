@@ -35,7 +35,7 @@ Known areas still under validation include:
 - Arbitrary Wii U geometry shaders that require a D3D11 compatibility fallback.
 - Stream-output-heavy effects and less common GX2 primitive or vertex formats.
 - Long-session stability while new shaders and D3D11On12 pipelines continue to appear.
-- Graphic packs that assume Vulkan behavior or use executable modifications outside the host's safe policy.
+- Graphic packs that assume Vulkan behavior or use executable modifications that are incompatible with the D3D11 host.
 
 Testing should be performed on the Series S with the same game area revisited after each change. When reporting a regression, include the full `LocalState\log.txt`, a screenshot or video, the approximate runtime before the issue, and whether the area had already compiled its shaders.
 
@@ -47,10 +47,11 @@ Testing should be performed on the Series S with the same game area revisited af
 - Chunked copying for large games and graphic packs.
 - Platform-assisted `StorageFile.CopyAsync` installation on Xbox, with automatic fallback to bounded sequential buffers when a storage provider does not support direct copying.
 - A unified installer that automatically identifies an extracted base game, update, or DLC.
+- A persistent `LocalState\GamesToInstall` drop folder for Xbox users without external storage. The library scan recursively detects WUD, WUX, ISO, WUA, WUHB, RPX, ELF, extracted base games, updates, DLC, and Cemu Graphic Packs. Local game files are listed for direct launch, while extracted content is installed into the MLC. All compatible Graphic Packs are enabled for every installed game.
 - Installed-game library with title name, Title ID, version, update, DLC, region, and graphic-pack information.
 - Persistent library selection on Xbox: the D-pad moves focus, while `A` explicitly confirms a title and keeps it selected.
 - Automatic mounting of an installed base game together with its update and DLC.
-- Import and safe activation of Cemu graphic packs.
+- Import and automatic activation of every Cemu Graphic Pack compatible with an installed game.
 - Active-account information in the top command bar.
 - Xbox controller discovery on the XAML apartment through `Windows.Gaming.Input::Gamepad`, with plain input snapshots forwarded to Cemu. SDL3-UWP remains statically integrated without passing apartment-affine WinRT objects to Cemu threads.
 - Automatic player-one Wii U GamePad profile.
@@ -61,6 +62,7 @@ Testing should be performed on the Series S with the same game area revisited af
   - The captured controls are hidden from the emulated game while the mouse is active.
 - XAudio 2.8 audio output for UWP.
 - A top-bar toggle for Cemu's native FPS, draw-call, CPU, RAM, and VRAM performance overlay.
+- Automatic game presentation mode: when a title starts, the top command bar and option panels disappear and the emulator surface expands to the entire app area.
 
 ## Repository layout
 
@@ -176,6 +178,8 @@ You can also open `Cemu-UWP-Host.slnx` in Visual Studio, select `x64`, choose **
 
 The same button accepts base games, updates, and DLC. Content is identified from its metadata and installed into the correct MLC location. Updates and DLC are associated with their base game by Title ID.
 
+If no external drive is available, start the application once so it creates `LocalState\GamesToInstall`, then copy supported content there and select **Scan local folder** in the Library. WUD, WUX, ISO, WUA, WUHB, RPX, and ELF files are detected recursively, shown as local game files in the library, and launched directly from `LocalState`. Extracted base games, updates, and DLC are detected through their `code`, `content`, and `meta` directories and installed into the MLC. Graphic Pack folders are detected through `rules.txt`, imported, and enabled for every compatible installed game. Successfully processed extracted-title sources receive `cemu-installed.txt`; Graphic Pack sources receive `cemu-graphic-pack-installed.txt`. Delete the corresponding marker only when you intentionally want to process that source again. Local game files remain visible as long as they remain inside `GamesToInstall`.
+
 Only use game files that you legally own and have extracted yourself. This project does not include games, title keys, console firmware, account credentials, or other copyrighted console data.
 
 ### Starting an installed title
@@ -193,15 +197,15 @@ With a pointer or mouse:
 
 Before launching, review the selected title's displayed version, update, DLC, region, and graphic-pack state.
 
-The tool tabs collapse when the title starts. They can be shown again from the top command bar without resizing the emulator surface.
+When a title starts, the top command bar and tool tabs disappear. The emulator surface expands across the entire application and remains unobstructed while the title is running.
 
 ### Importing graphic packs
 
-1. Confirm a game in the library to restrict the policy to that title. If no title has been confirmed since launch, the policy scans all installed titles.
-2. Select **Import graphicPacks**.
+1. Open the Library tab.
+2. Select **Import enhancements**.
 3. Choose either a `graphicPacks` directory or a parent directory containing one.
 
-Files are copied in chunks into the application's persistent `graphicPacks` directory. The host enables compatible workaround packs while leaving executable mods and cheats disabled by its safe automatic policy.
+Files are copied in chunks into the application's persistent `graphicPacks` directory. The host enables every compatible Graphic Pack for every installed game, including compatible mods and cheats. The same activation is reapplied when the library refreshes and immediately before a game starts.
 
 ### Controller and virtual mouse
 
