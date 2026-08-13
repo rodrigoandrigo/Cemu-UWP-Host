@@ -65,6 +65,8 @@ namespace Cemu_UWP_Host
 		bool SetGamepadState(const CemuEmbedGamepadState& state);
 		bool SetVirtualMouse(int x, int y, bool leftDown, bool enabled);
 		bool SetPerformanceMetrics(bool enabled);
+		bool GetSettings(CemuEmbedSettings& settings);
+		bool SetSettings(const CemuEmbedSettings& settings);
 		std::vector<DimensionsFigure> GetDimensionsFigures();
 		bool PlaceDimensionsFigure(uint32_t figureId, uint8_t slot);
 		bool RemoveDimensionsFigure(uint8_t slot);

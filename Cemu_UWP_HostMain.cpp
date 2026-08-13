@@ -429,6 +429,21 @@ bool Cemu_UWP_HostMain::SetPerformanceMetrics(bool enabled)
 		CemuEmbed_SetPerformanceMetrics(m_instance, enabled ? 1 : 0) == CEMU_EMBED_OK;
 }
 
+bool Cemu_UWP_HostMain::GetSettings(CemuEmbedSettings& settings)
+{
+	if (!m_instance)
+		return false;
+	settings = {};
+	settings.struct_size = sizeof(settings);
+	settings.abi_version = CEMU_EMBED_SETTINGS_VERSION;
+	return CemuEmbed_GetSettings(m_instance, &settings) == CEMU_EMBED_OK;
+}
+
+bool Cemu_UWP_HostMain::SetSettings(const CemuEmbedSettings& settings)
+{
+	return m_instance && CemuEmbed_SetSettings(m_instance, &settings) == CEMU_EMBED_OK;
+}
+
 std::vector<DimensionsFigure> Cemu_UWP_HostMain::GetDimensionsFigures()
 {
 	std::vector<DimensionsFigure> figures;

@@ -22,6 +22,7 @@ using namespace Windows::UI::Xaml::Input;
 using namespace Windows::UI::Xaml::Interop;
 using namespace Windows::UI::Xaml::Media;
 using namespace Windows::UI::Xaml::Navigation;
+using namespace Windows::UI::ViewManagement;
 /// <summary>
 /// Inicializa o objeto singleton do aplicativo.  Esta é a primeira linha de código criado
 /// executado e, como tal, é o equivalente lógico de main() ou WinMain().
@@ -88,6 +89,26 @@ void App::OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEvent
 	
 	// Verifique se a janela atual está ativa
 	Window::Current->Activate();
+	EnterFullScreen();
+}
+
+void App::EnterFullScreen()
+{
+	try
+	{
+		auto view = ApplicationView::GetForCurrentView();
+		// Xbox normally reserves a 5% TV-safe margin on each side for XAML. Use the
+		// CoreWindow bounds so the host, command bar and SwapChainPanel fill the
+		// complete display instead of rendering as a centered 1728x972 surface.
+		view->SetDesiredBoundsMode(ApplicationViewBoundsMode::UseCoreWindow);
+		if (!view->IsFullScreenMode)
+			view->TryEnterFullScreenMode();
+	}
+	catch (Platform::Exception^)
+	{
+		// Some desktop/window-management policies may reject the request. The app
+		// remains usable with the bounds selected by the system in that case.
+	}
 }
 /// <summary>
 /// Chamado quando a execução do aplicativo está sendo suspensa.  O estado do aplicativo é salvo
@@ -115,6 +136,7 @@ void App::OnResuming(Object ^sender, Object ^args)
 	(void) args; // Parâmetro não usado
 
 	m_directXPage->LoadInternalState(ApplicationData::Current->LocalSettings->Values);
+	EnterFullScreen();
 }
 
 /// <summary>

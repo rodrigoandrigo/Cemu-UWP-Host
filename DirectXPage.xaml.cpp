@@ -320,6 +320,9 @@ struct __declspec(uuid("45D64A29-A63E-4CB6-B498-5781D298CB4F")) ICoreWindowInter
 DirectXPage::DirectXPage()
 {
 	InitializeComponent();
+	// Always open the library in its compact layout. The guide remains available
+	// through its toggle, but an older persisted expanded state is not restored.
+	SetGettingStartedExpanded(false);
 	// Registering WGI events on the XAML thread. The host mirrors a plain
 	// controller snapshot into Cemu, so the DLL never has to use a WGI object
 	// from SDL's worker apartment on Xbox.
@@ -694,7 +697,7 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 			{
 				page->launchStatus->Text = "Failed to import graphic packs; see Help and errors";
 				page->SetTabsVisible(true);
-				page->toolTabs->SelectedIndex = 2;
+				page->toolTabs->SelectedIndex = 3;
 				page->UpdateStartButton();
 				return;
 			}
@@ -1287,6 +1290,151 @@ void DirectXPage::ToggleTabs_Click(Platform::Object^, RoutedEventArgs^)
 	SetTabsVisible(tabsPanel->Visibility != VisibleValue);
 }
 
+void DirectXPage::ToolTabs_SelectionChanged(
+	Platform::Object^, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^)
+{
+	// Library, Toy Pad and diagnostics are deliberately compact. Settings has
+	// several categories and needs most of the available screen, with its inner
+	// ScrollViewer handling the remaining content on both PC and Xbox.
+	if (toolTabs->SelectedIndex != 2)
+	{
+		tabsPanel->MaxHeight = 420.0;
+		return;
+	}
+	const double availableHeight = Window::Current
+		? Window::Current->Bounds.Height - 112.0
+		: 720.0;
+	tabsPanel->MaxHeight = (std::max)(420.0, (std::min)(760.0, availableHeight));
+}
+
+void DirectXPage::ToggleGettingStarted_Click(Platform::Object^, RoutedEventArgs^)
+{
+	SetGettingStartedExpanded(!m_gettingStartedExpanded);
+}
+
+void DirectXPage::LoadSettings()
+{
+	CemuEmbedSettings settings{};
+	if (!m_main || !m_main->GetSettings(settings))
+	{
+		applySettingsButton->IsEnabled = false;
+		settingsStatus->Text = "Cemu settings are unavailable.";
+		return;
+	}
+	auto select = [](ComboBox^ box, int value, int maximum)
+	{
+		box->SelectedIndex = (std::max)(0, (std::min)(value, maximum));
+	};
+	select(cpuModeBox, settings.cpu_mode, 4);
+	select(consoleLanguageBox, settings.console_language, 11);
+	select(vsyncBox, settings.vsync == 0 ? 0 : 1, 1);
+	bootSoundCheck->IsChecked = settings.play_boot_sound != 0;
+	disableScreensaverCheck->IsChecked = settings.disable_screensaver != 0;
+	asyncCompileCheck->IsChecked = settings.async_compile != 0;
+	gx2SyncCheck->IsChecked = settings.gx2drawdone_sync != 0;
+	upsideDownCheck->IsChecked = settings.render_upside_down != 0;
+	select(upscaleFilterBox, settings.upscale_filter, 3);
+	select(downscaleFilterBox, settings.downscale_filter, 3);
+	select(scalingBox, settings.fullscreen_scaling, 1);
+	overrideGammaCheck->IsChecked = settings.override_gamma != 0;
+	gammaSlider->Value = settings.override_gamma_value;
+	displayGammaSlider->Value = settings.display_gamma;
+	select(notificationPositionBox, settings.notification_position, 6);
+	notificationScaleSlider->Value = settings.notification_text_scale;
+	notifyProfilesCheck->IsChecked = settings.notification_controller_profiles != 0;
+	notifyBatteryCheck->IsChecked = settings.notification_controller_battery != 0;
+	notifyShadersCheck->IsChecked = settings.notification_shader_compiling != 0;
+	notifyFriendsCheck->IsChecked = settings.notification_friends != 0;
+	// The UI order is optimized for UWP, but settings.xml stores IAudioAPI's
+	// native enum values: DirectSound=0, XAudio27=1, XAudio2=2, Cubeb=3.
+	const int audioApiIndex = settings.audio_api == 0 ? 1 :
+		settings.audio_api == 1 ? 2 :
+		settings.audio_api == 3 ? 3 : 0;
+	select(audioApiBox, audioApiIndex, 3);
+	audioDelaySlider->Value = settings.audio_delay;
+	select(tvChannelsBox, settings.tv_channels, 2);
+	select(padChannelsBox, settings.pad_channels, 2);
+	select(inputChannelsBox, settings.input_channels, 2);
+	tvVolumeSlider->Value = settings.tv_volume;
+	padVolumeSlider->Value = settings.pad_volume;
+	inputVolumeSlider->Value = settings.input_volume;
+	portalVolumeSlider->Value = settings.portal_volume;
+	skylandersCheck->IsChecked = settings.emulate_skylander_portal != 0;
+	infinityCheck->IsChecked = settings.emulate_infinity_base != 0;
+	dimensionsCheck->IsChecked = settings.emulate_dimensions_toypad != 0;
+	applySettingsButton->IsEnabled = !m_gameRunning;
+	settingsStatus->Text = "Settings loaded. Select Apply settings to save changes.";
+}
+
+void DirectXPage::ApplySettings_Click(Platform::Object^, RoutedEventArgs^)
+{
+	if (!m_main || !m_cemuReady || m_gameRunning)
+	{
+		settingsStatus->Text = "Stop the running game before changing settings.";
+		return;
+	}
+	CemuEmbedSettings settings{};
+	if (!m_main->GetSettings(settings))
+	{
+		settingsStatus->Text = "Could not read the current Cemu settings.";
+		return;
+	}
+	auto checked = [](CheckBox^ box) { return box->IsChecked->Value ? 1 : 0; };
+	settings.cpu_mode = cpuModeBox->SelectedIndex;
+	settings.console_language = consoleLanguageBox->SelectedIndex;
+	settings.vsync = vsyncBox->SelectedIndex;
+	settings.play_boot_sound = checked(bootSoundCheck);
+	settings.disable_screensaver = checked(disableScreensaverCheck);
+	settings.async_compile = checked(asyncCompileCheck);
+	settings.gx2drawdone_sync = checked(gx2SyncCheck);
+	settings.render_upside_down = checked(upsideDownCheck);
+	settings.upscale_filter = upscaleFilterBox->SelectedIndex;
+	settings.downscale_filter = downscaleFilterBox->SelectedIndex;
+	settings.fullscreen_scaling = scalingBox->SelectedIndex;
+	settings.override_gamma = checked(overrideGammaCheck);
+	settings.override_gamma_value = static_cast<float>(gammaSlider->Value);
+	settings.display_gamma = static_cast<float>(displayGammaSlider->Value);
+	settings.notification_position = notificationPositionBox->SelectedIndex;
+	settings.notification_text_scale = static_cast<int32_t>(notificationScaleSlider->Value);
+	settings.notification_controller_profiles = checked(notifyProfilesCheck);
+	settings.notification_controller_battery = checked(notifyBatteryCheck);
+	settings.notification_shader_compiling = checked(notifyShadersCheck);
+	settings.notification_friends = checked(notifyFriendsCheck);
+	static constexpr int32_t audioApiValues[] = { 2, 0, 1, 3 };
+	const int audioApiIndex = (std::max)(0,
+		(std::min)(audioApiBox->SelectedIndex, 3));
+	settings.audio_api = audioApiValues[audioApiIndex];
+	settings.audio_delay = static_cast<int32_t>(audioDelaySlider->Value);
+	settings.tv_channels = tvChannelsBox->SelectedIndex;
+	settings.pad_channels = padChannelsBox->SelectedIndex;
+	settings.input_channels = inputChannelsBox->SelectedIndex;
+	settings.tv_volume = static_cast<int32_t>(tvVolumeSlider->Value);
+	settings.pad_volume = static_cast<int32_t>(padVolumeSlider->Value);
+	settings.input_volume = static_cast<int32_t>(inputVolumeSlider->Value);
+	settings.portal_volume = static_cast<int32_t>(portalVolumeSlider->Value);
+	settings.emulate_skylander_portal = checked(skylandersCheck);
+	settings.emulate_infinity_base = checked(infinityCheck);
+	settings.emulate_dimensions_toypad = checked(dimensionsCheck);
+	if (!m_main->SetSettings(settings))
+	{
+		settingsStatus->Text = "Could not save Cemu settings.";
+		return;
+	}
+	settingsStatus->Text = "Settings saved. USB and startup options apply after restarting the app.";
+}
+
+void DirectXPage::SetGettingStartedExpanded(bool expanded)
+{
+	m_gettingStartedExpanded = expanded;
+	gettingStartedDetails->Visibility = expanded ? VisibleValue : CollapsedValue;
+	gettingStartedToggleText->Text = expanded ? "Hide guide" : "Show guide";
+	// Segoe MDL2 Assets: ChevronUp / ChevronDown.
+	gettingStartedToggleIcon->Glyph = WinRtString(expanded ? L"\xE70E" : L"\xE70D");
+	Windows::UI::Xaml::Automation::AutomationProperties::SetName(
+		gettingStartedToggleButton,
+		WinRtString(expanded ? L"Hide getting started guide" : L"Show getting started guide"));
+}
+
 void DirectXPage::ClearErrors_Click(Platform::Object^, RoutedEventArgs^)
 {
 	errorsList->Items->Clear();
@@ -1398,14 +1546,13 @@ void DirectXPage::SetTabsVisible(bool visible)
 		visible = false;
 	tabsPanel->Visibility = visible ? VisibleValue : CollapsedValue;
 	toggleTabsButtonText->Text = visible ? "Hide options" : "Show options";
-	if (visible && m_gameRunning)
-		toolTabs->Focus(Windows::UI::Xaml::FocusState::Programmatic);
 	if (!visible && m_gameRunning)
 		FocusEmulatorInput();
 }
 
 void DirectXPage::SetGamePresentation(bool running)
 {
+	applySettingsButton->IsEnabled = m_cemuReady && !running;
 	if (running)
 	{
 		topCommandBar->Visibility = CollapsedValue;
@@ -1415,7 +1562,16 @@ void DirectXPage::SetGamePresentation(bool running)
 		return;
 	}
 
+	// Restore every focus target that FocusEmulatorInput disables. Without this,
+	// a failed launch leaves the library visible but impossible to navigate with
+	// the Xbox controller. Returning from game presentation must also restore the
+	// tools panel that was hidden immediately before launch.
+	toggleTabsButton->IsTabStop = true;
+	startButton->IsTabStop = true;
+	metricsButton->IsTabStop = true;
 	topCommandBar->Visibility = VisibleValue;
+	tabsPanel->Visibility = VisibleValue;
+	toggleTabsButtonText->Text = "Hide options";
 	Grid::SetRow(emulatorViewport, 1);
 	Grid::SetRowSpan(emulatorViewport, 1);
 }
@@ -1451,6 +1607,7 @@ void DirectXPage::OnCemuStateChanged(CemuEmbedState state)
 				TryConfigureDefaultGamepad();
 				RefreshLibrary();
 				RefreshDimensionsFigures();
+				LoadSettings();
 			}
 			else if (state == CEMU_EMBED_STATE_INITIALIZING)
 				launchStatus->Text = "Initializing emulator...";
@@ -1476,6 +1633,7 @@ void DirectXPage::OnCemuStateChanged(CemuEmbedState state)
 				placeDimensionsFigureButton->IsEnabled = false;
 				removeDimensionsFigureButton->IsEnabled = false;
 				moveDimensionsFigureButton->IsEnabled = false;
+				applySettingsButton->IsEnabled = false;
 			}
 			UpdateStartButton();
 		})));
@@ -1742,10 +1900,13 @@ int DirectXPage::FindInstalledTitleIndex(uint64_t titleId) const
 	return -1;
 }
 
-void DirectXPage::SaveInternalState(Windows::Foundation::Collections::IPropertySet^)
+void DirectXPage::SaveInternalState(Windows::Foundation::Collections::IPropertySet^ state)
 {
+	(void)state;
 }
 
-void DirectXPage::LoadInternalState(Windows::Foundation::Collections::IPropertySet^)
+void DirectXPage::LoadInternalState(Windows::Foundation::Collections::IPropertySet^ state)
 {
+	(void)state;
+	SetGettingStartedExpanded(false);
 }

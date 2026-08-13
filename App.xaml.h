@@ -20,6 +20,7 @@ namespace Cemu_UWP_Host
 		virtual void OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEventArgs^ e) override;
 
 	private:
+		void EnterFullScreen();
 		void OnSuspending(Platform::Object^ sender, Windows::ApplicationModel::SuspendingEventArgs^ e);
 		void OnResuming(Platform::Object ^sender, Platform::Object ^args);
 		void OnNavigationFailed(Platform::Object ^sender, Windows::UI::Xaml::Navigation::NavigationFailedEventArgs ^e);

@@ -38,6 +38,11 @@ namespace Cemu_UWP_Host
 		void StartGame_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void ToggleMetrics_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void ToggleTabs_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void ToolTabs_SelectionChanged(Platform::Object^ sender,
+			Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ args);
+		void ToggleGettingStarted_Click(Platform::Object^ sender,
+			Windows::UI::Xaml::RoutedEventArgs^ args);
+		void ApplySettings_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void PlaceDimensionsFigure_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void RemoveDimensionsFigure_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void MoveDimensionsFigure_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
@@ -51,6 +56,7 @@ namespace Cemu_UWP_Host
 		void FocusEmulatorInput();
 		void SetSystemPointerForUi(bool enabled);
 		void SetTabsVisible(bool visible);
+		void SetGettingStartedExpanded(bool expanded);
 		void SetGamePresentation(bool running);
 		void AppendError(const std::string& message);
 		void OnCemuStateChanged(CemuEmbedState state);
@@ -65,6 +71,7 @@ namespace Cemu_UWP_Host
 		CemuEmbedGamepadState PublishGamepadState();
 		void UpdateActiveAccount();
 		void RefreshDimensionsFigures();
+		void LoadSettings();
 		void TryConfigureDefaultGamepad();
 		void UpdateVirtualMouse(const CemuEmbedGamepadState& gamepad);
 		void SetVirtualMouseEnabled(bool enabled);
@@ -93,6 +100,7 @@ namespace Cemu_UWP_Host
 		bool m_optionsChordHeld = false;
 		bool m_virtualMouseLeftDown = false;
 		bool m_performanceMetricsVisible = false;
+		bool m_gettingStartedExpanded = false;
 		uint64_t m_selectedTitleId = 0;
 		bool m_restoringCommittedSelection = false;
 		// The Xbox input object belongs to the XAML apartment. Keep one snapshot

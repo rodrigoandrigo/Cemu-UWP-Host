@@ -223,15 +223,16 @@
         </Path.RenderTransform>
       </Path>
 
-      <StackPanel x:Name="tabsPanel"
-                  Canvas.ZIndex="10"
-                  HorizontalAlignment="Stretch"
-                  VerticalAlignment="Top"
-                  MaxHeight="420"
-                  Background="{StaticResource PanelBrush}">
+      <Grid x:Name="tabsPanel"
+            Canvas.ZIndex="10"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Top"
+            MaxHeight="420"
+            Background="{StaticResource PanelBrush}">
         <Pivot x:Name="toolTabs"
                Background="Transparent"
-               Foreground="White">
+               Foreground="White"
+               SelectionChanged="ToolTabs_SelectionChanged">
           <PivotItem Header="My games">
             <Grid Padding="24,6,24,22">
               <Grid.RowDefinitions>
@@ -248,9 +249,14 @@
                       Padding="16,12"
                       Margin="0,0,0,10">
                 <Grid>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                  </Grid.RowDefinitions>
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                   </Grid.ColumnDefinitions>
                   <Border Width="36"
                           Height="36"
@@ -264,14 +270,49 @@
                               HorizontalAlignment="Center"
                               VerticalAlignment="Center" />
                   </Border>
-                  <StackPanel Grid.Column="1">
+                  <StackPanel Grid.Column="1"
+                              VerticalAlignment="Center">
                     <TextBlock Text="Getting started"
                                FontSize="16"
                                FontWeight="SemiBold"
                                Foreground="White" />
+                    <TextBlock Text="A quick guide for installing and starting games"
+                               Style="{StaticResource HelpfulTextStyle}"
+                               FontSize="13"
+                               Margin="0,2,8,0" />
+                  </StackPanel>
+                  <Button x:Name="gettingStartedToggleButton"
+                          Grid.Column="2"
+                          MinWidth="116"
+                          Padding="10,6"
+                          HorizontalAlignment="Right"
+                          VerticalAlignment="Center"
+                          Background="Transparent"
+                          Foreground="White"
+                          BorderBrush="{StaticResource DividerBrush}"
+                          BorderThickness="1"
+                          Click="ToggleGettingStarted_Click"
+                          ToolTipService.ToolTip="Collapse or expand the getting started guide">
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock x:Name="gettingStartedToggleText"
+                                 Text="Show guide"
+                                 VerticalAlignment="Center" />
+                      <FontIcon x:Name="gettingStartedToggleIcon"
+                                Glyph="&#xE70D;"
+                                FontSize="12"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Button>
+                  <StackPanel x:Name="gettingStartedDetails"
+                              Grid.Row="1"
+                              Grid.Column="1"
+                              Grid.ColumnSpan="2"
+                              Margin="0,8,0,0"
+                              Visibility="Collapsed">
                     <TextBlock Text="1. Install content  •  2. Choose a game and press A  •  3. Select Start game"
                                Style="{StaticResource HelpfulTextStyle}"
-                               Margin="0,3,0,0" />
+                               Margin="0,0,0,0" />
                     <TextBlock Text="Extracted folders must contain code, content, and meta. Updates and DLC are linked automatically."
                                Style="{StaticResource HelpfulTextStyle}"
                                FontSize="13"
@@ -284,6 +325,18 @@
                                Style="{StaticResource HelpfulTextStyle}"
                                FontSize="13"
                                Margin="0,2,0,0" />
+                    <StackPanel Orientation="Horizontal"
+                                Margin="0,5,0,0">
+                      <FontIcon Glyph="&#xE8C9;"
+                                FontSize="14"
+                                Foreground="{StaticResource AccentBlueBrush}"
+                                VerticalAlignment="Top"
+                                Margin="0,1,7,0" />
+                      <TextBlock Text="Some encrypted WUD, WUX, ISO, and WUA games require a valid keys.txt before they can be recognized. Select Import keys.txt first."
+                                 Style="{StaticResource HelpfulTextStyle}"
+                                 Foreground="{StaticResource AccentBlueHoverBrush}"
+                                 FontSize="13" />
+                    </StackPanel>
                   </StackPanel>
                 </Grid>
               </Border>
@@ -482,6 +535,109 @@
             </Grid>
           </PivotItem>
 
+          <PivotItem Header="Settings">
+            <Grid Padding="24,6,24,16">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="Cemu settings" Style="{StaticResource SectionHeadingStyle}" />
+                  <TextBlock Text="Direct3D 11 and the Xbox GPU are fixed by this host. Changes marked for restart apply to the next game launch."
+                             Style="{StaticResource HelpfulTextStyle}" Margin="0,2,16,8" />
+                </StackPanel>
+                <Button x:Name="applySettingsButton" Grid.Column="1" Content="Apply settings"
+                        IsEnabled="False" Click="ApplySettings_Click" />
+              </Grid>
+              <ScrollViewer Grid.Row="1"
+                            VerticalScrollMode="Enabled"
+                            VerticalScrollBarVisibility="Visible"
+                            HorizontalScrollMode="Disabled"
+                            HorizontalScrollBarVisibility="Disabled"
+                            IsTabStop="True">
+                <StackPanel Spacing="10">
+                  <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="5" Padding="12">
+                    <Grid ColumnSpacing="16">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                      <StackPanel>
+                        <TextBlock Text="General" Style="{StaticResource SectionHeadingStyle}" />
+                        <ComboBox x:Name="cpuModeBox" Header="CPU mode" SelectedIndex="4">
+                          <ComboBoxItem Content="Single-core interpreter"/><ComboBoxItem Content="Single-core recompiler"/>
+                          <ComboBoxItem Content="Dual-core recompiler (legacy)"/><ComboBoxItem Content="Multi-core recompiler"/><ComboBoxItem Content="Auto"/>
+                        </ComboBox>
+                        <ComboBox x:Name="consoleLanguageBox" Header="Console language" SelectedIndex="1">
+                          <ComboBoxItem Content="Japanese"/><ComboBoxItem Content="English"/><ComboBoxItem Content="French"/><ComboBoxItem Content="German"/>
+                          <ComboBoxItem Content="Italian"/><ComboBoxItem Content="Spanish"/><ComboBoxItem Content="Chinese"/><ComboBoxItem Content="Korean"/>
+                          <ComboBoxItem Content="Dutch"/><ComboBoxItem Content="Portuguese"/><ComboBoxItem Content="Russian"/><ComboBoxItem Content="Taiwanese"/>
+                        </ComboBox>
+                        <CheckBox x:Name="bootSoundCheck" Content="Play boot sound"/>
+                        <CheckBox x:Name="disableScreensaverCheck" Content="Disable screen saver"/>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1">
+                        <TextBlock Text="Graphics" Style="{StaticResource SectionHeadingStyle}" />
+                        <TextBlock Text="Backend: Direct3D 11 (Xbox fixed)" Style="{StaticResource HelpfulTextStyle}"/>
+                        <ComboBox x:Name="vsyncBox" Header="VSync" SelectedIndex="1"><ComboBoxItem Content="Off"/><ComboBoxItem Content="On"/></ComboBox>
+                        <CheckBox x:Name="asyncCompileCheck" Content="Async shader compile"/>
+                        <CheckBox x:Name="gx2SyncCheck" Content="GX2DrawDone synchronization"/>
+                        <CheckBox x:Name="upsideDownCheck" Content="Render upside down"/>
+                      </StackPanel>
+                      <StackPanel Grid.Column="2">
+                        <TextBlock Text="Scaling and gamma" Style="{StaticResource SectionHeadingStyle}" />
+                        <ComboBox x:Name="upscaleFilterBox" Header="Upscale filter" SelectedIndex="1"><ComboBoxItem Content="Linear"/><ComboBoxItem Content="Bicubic"/><ComboBoxItem Content="Bicubic Hermite"/><ComboBoxItem Content="Nearest neighbor"/></ComboBox>
+                        <ComboBox x:Name="downscaleFilterBox" Header="Downscale filter" SelectedIndex="0"><ComboBoxItem Content="Linear"/><ComboBoxItem Content="Bicubic"/><ComboBoxItem Content="Bicubic Hermite"/><ComboBoxItem Content="Nearest neighbor"/></ComboBox>
+                        <ComboBox x:Name="scalingBox" Header="Fullscreen scaling" SelectedIndex="0"><ComboBoxItem Content="Keep aspect ratio"/><ComboBoxItem Content="Stretch"/></ComboBox>
+                        <CheckBox x:Name="overrideGammaCheck" Content="Override game gamma"/>
+                        <Slider x:Name="gammaSlider" Header="Gamma" Minimum="1" Maximum="3" StepFrequency="0.1" Value="2.2"/>
+                        <Slider x:Name="displayGammaSlider" Header="Display gamma (0 = sRGB)" Minimum="0" Maximum="3" StepFrequency="0.1" Value="2.2"/>
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                  <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="5" Padding="12">
+                    <Grid ColumnSpacing="16">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                      <StackPanel>
+                        <TextBlock Text="Notifications" Style="{StaticResource SectionHeadingStyle}" />
+                        <ComboBox x:Name="notificationPositionBox" Header="Position" SelectedIndex="1"><ComboBoxItem Content="Disabled"/><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/></ComboBox>
+                        <Slider x:Name="notificationScaleSlider" Header="Text scale" Minimum="50" Maximum="300" StepFrequency="10" Value="100"/>
+                        <CheckBox x:Name="notifyProfilesCheck" Content="Controller profiles"/><CheckBox x:Name="notifyBatteryCheck" Content="Controller battery"/>
+                        <CheckBox x:Name="notifyShadersCheck" Content="Shader compiling"/><CheckBox x:Name="notifyFriendsCheck" Content="Friends"/>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1">
+                        <TextBlock Text="Audio" Style="{StaticResource SectionHeadingStyle}" />
+                        <ComboBox x:Name="audioApiBox" Header="Audio backend" SelectedIndex="0"><ComboBoxItem Content="XAudio 2.8 (recommended)"/><ComboBoxItem Content="DirectSound"/><ComboBoxItem Content="XAudio 2.7"/><ComboBoxItem Content="Cubeb"/></ComboBox>
+                        <Slider x:Name="audioDelaySlider" Header="Latency level" Minimum="0" Maximum="10" StepFrequency="1" Value="2"/>
+                        <ComboBox x:Name="tvChannelsBox" Header="TV channels" SelectedIndex="1"><ComboBoxItem Content="Mono"/><ComboBoxItem Content="Stereo"/><ComboBoxItem Content="Surround"/></ComboBox>
+                        <ComboBox x:Name="padChannelsBox" Header="GamePad channels" SelectedIndex="1"><ComboBoxItem Content="Mono"/><ComboBoxItem Content="Stereo"/><ComboBoxItem Content="Surround"/></ComboBox>
+                        <ComboBox x:Name="inputChannelsBox" Header="Input channels" SelectedIndex="0"><ComboBoxItem Content="Mono"/><ComboBoxItem Content="Stereo"/><ComboBoxItem Content="Surround"/></ComboBox>
+                        <Slider x:Name="tvVolumeSlider" Header="TV volume" Minimum="0" Maximum="100" StepFrequency="1" Value="50"/>
+                        <Slider x:Name="padVolumeSlider" Header="GamePad volume" Minimum="0" Maximum="100" StepFrequency="1" Value="0"/>
+                        <Slider x:Name="inputVolumeSlider" Header="Input volume" Minimum="0" Maximum="100" StepFrequency="1" Value="50"/>
+                        <Slider x:Name="portalVolumeSlider" Header="Portal volume" Minimum="0" Maximum="100" StepFrequency="1" Value="50"/>
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                  <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="5" Padding="12">
+                    <StackPanel>
+                      <TextBlock Text="Emulated USB devices" Style="{StaticResource SectionHeadingStyle}" />
+                      <StackPanel Orientation="Horizontal" Spacing="20">
+                        <CheckBox x:Name="skylandersCheck" Content="Skylanders portal"/>
+                        <CheckBox x:Name="infinityCheck" Content="Disney Infinity base"/>
+                        <CheckBox x:Name="dimensionsCheck" Content="LEGO Dimensions Toy Pad"/>
+                      </StackPanel>
+                      <TextBlock Text="USB-device changes require restarting the app before launching a game." Style="{StaticResource HelpfulTextStyle}"/>
+                    </StackPanel>
+                  </Border>
+                  <TextBlock x:Name="settingsStatus" Text="Settings become available when Cemu is ready." Style="{StaticResource HelpfulTextStyle}" />
+                </StackPanel>
+              </ScrollViewer>
+            </Grid>
+          </PivotItem>
+
           <PivotItem Header="Help and errors">
             <Grid Padding="24,6,24,22">
               <Grid.RowDefinitions>
@@ -543,7 +699,7 @@
             </Grid>
           </PivotItem>
         </Pivot>
-      </StackPanel>
+      </Grid>
     </Grid>
   </Grid>
 </Page>
