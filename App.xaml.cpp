@@ -14,6 +14,7 @@ using namespace Windows::ApplicationModel::Activation;
 using namespace Windows::Foundation;
 using namespace Windows::Foundation::Collections;
 using namespace Windows::Storage;
+using namespace Windows::System::Profile;
 using namespace Windows::UI::Xaml;
 using namespace Windows::UI::Xaml::Controls;
 using namespace Windows::UI::Xaml::Controls::Primitives;
@@ -23,6 +24,24 @@ using namespace Windows::UI::Xaml::Interop;
 using namespace Windows::UI::Xaml::Media;
 using namespace Windows::UI::Xaml::Navigation;
 using namespace Windows::UI::ViewManagement;
+
+namespace
+{
+bool IsXboxDevice()
+{
+	try
+	{
+		auto versionInfo = AnalyticsInfo::VersionInfo;
+		return versionInfo != nullptr && versionInfo->DeviceFamily == "Windows.Xbox";
+	}
+	catch (Platform::Exception^)
+	{
+		// If platform detection is unavailable, keep the desktop-safe windowed
+		// behavior instead of forcing an unsupported display transition.
+		return false;
+	}
+}
+}
 /// <summary>
 /// Inicializa o objeto singleton do aplicativo.  Esta é a primeira linha de código criado
 /// executado e, como tal, é o equivalente lógico de main() ou WinMain().
@@ -97,6 +116,14 @@ void App::EnterFullScreen()
 	try
 	{
 		auto view = ApplicationView::GetForCurrentView();
+		if (!IsXboxDevice())
+		{
+			// Full-screen startup is an Xbox presentation policy. Desktop UWP must
+			// retain the normal resizable window selected by Windows.
+			if (view->IsFullScreenMode)
+				view->ExitFullScreenMode();
+			return;
+		}
 		// Xbox normally reserves a 5% TV-safe margin on each side for XAML. Use the
 		// CoreWindow bounds so the host, command bar and SwapChainPanel fill the
 		// complete display instead of rendering as a centered 1728x972 surface.
