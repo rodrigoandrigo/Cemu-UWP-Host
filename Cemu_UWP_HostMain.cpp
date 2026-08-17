@@ -63,12 +63,18 @@ struct CachedTitleEntry
 	StorageFile^ file{};
 };
 
+struct DirectCopyBroker
+{
+	Cemu_UWP_HostMain* host{};
+	std::unordered_map<std::wstring, StorageFolder^> destinationFolders;
+	bool fastCopyDisabled{};
+};
+
 struct TitleInstallBroker
 {
 	std::vector<CachedTitleEntry> entries;
-	std::unordered_map<std::wstring, StorageFolder^> destinationFolders;
+	DirectCopyBroker directCopy;
 	bool cacheReady{};
-	bool fastCopyDisabled{};
 	std::function<void(uint64_t, uint64_t, const std::string&)> progressCallback;
 	std::chrono::steady_clock::time_point lastProgressUpdate{};
 };
@@ -216,12 +222,11 @@ void CEMU_EMBED_CALL CachedTitleProgress(void* userData, uint64_t bytesCopied,
 		relativePath ? relativePath : "");
 }
 
-CemuEmbedResult CEMU_EMBED_CALL CopyCachedTitleFile(void* userData, void* fileHandle,
+CemuEmbedResult CopyFileUsingStorageBroker(DirectCopyBroker& broker, void* fileHandle,
 	const char* destinationPathUtf8)
 {
-	if (!userData || !fileHandle || !destinationPathUtf8)
+	if (!fileHandle || !destinationPathUtf8)
 		return CEMU_EMBED_INVALID_ARGUMENT;
-	auto& broker = *static_cast<TitleInstallBroker*>(userData);
 	if (broker.fastCopyDisabled)
 		return CEMU_EMBED_INVALID_STATE;
 
@@ -260,11 +265,21 @@ CemuEmbedResult CEMU_EMBED_CALL CopyCachedTitleFile(void* userData, void* fileHa
 	catch (...)
 	{
 		// Some providers do not implement broker-to-app CopyAsync. Disable the
-		// fast path for the rest of this install and let Cemu use chunked reads.
+		// fast path for the rest of this operation and let Cemu use its compatible
+		// buffered reader only when the platform path is unavailable.
 		broker.fastCopyDisabled = true;
 		broker.destinationFolders.clear();
 		return CEMU_EMBED_STORAGE_FAILED;
 	}
+}
+
+CemuEmbedResult CEMU_EMBED_CALL CopyCachedTitleFile(void* userData, void* fileHandle,
+	const char* destinationPathUtf8)
+{
+	if (!userData)
+		return CEMU_EMBED_INVALID_ARGUMENT;
+	auto& installBroker = *static_cast<TitleInstallBroker*>(userData);
+	return CopyFileUsingStorageBroker(installBroker.directCopy, fileHandle, destinationPathUtf8);
 }
 }
 
@@ -308,10 +323,12 @@ bool Cemu_UWP_HostMain::Start()
 bool Cemu_UWP_HostMain::LaunchGame(StorageFolder^ gameFolder)
 {
 	if (!m_instance || !gameFolder) return false;
+	DirectCopyBroker broker{ this };
 	const CemuEmbedBrokeredStorage storage{
-		sizeof(storage), CEMU_EMBED_BROKERED_STORAGE_VERSION, this,
+		sizeof(storage), CEMU_EMBED_BROKERED_STORAGE_VERSION, &broker,
 		EnumerateBrokeredFolder, OpenBrokeredFile, ReadBrokeredStream,
-		CloseBrokeredStream, BrokeredProgress, nullptr
+		CloseBrokeredStream, DirectCopyBrokeredProgress, CopyBrokeredFileToCache,
+		OpenBrokeredRelativeFile
 	};
 	return CemuEmbed_LaunchGameFromBrokeredFolder(m_instance, reinterpret_cast<void*>(gameFolder), &storage) == CEMU_EMBED_OK;
 }
@@ -329,16 +346,61 @@ bool Cemu_UWP_HostMain::LaunchGamePath(const std::string& gamePath)
 		CemuEmbed_LaunchGame(m_instance, gamePath.c_str()) == CEMU_EMBED_OK;
 }
 
+bool Cemu_UWP_HostMain::LaunchExternalGamePath(const std::string& gamePath,
+	const std::vector<std::string>& supplementalTitlePaths)
+{
+	if (!m_instance || gamePath.empty())
+		return false;
+	std::vector<const char*> paths;
+	paths.reserve(supplementalTitlePaths.size());
+	for (const auto& path : supplementalTitlePaths)
+	{
+		if (!path.empty())
+			paths.push_back(path.c_str());
+	}
+	return CemuEmbed_LaunchGameWithExternalTitles(m_instance, gamePath.c_str(),
+		paths.empty() ? nullptr : paths.data(), static_cast<uint32_t>(paths.size())) ==
+		CEMU_EMBED_OK;
+}
+
+bool Cemu_UWP_HostMain::LaunchExternalGameFolders(StorageFolder^ selectedFolder,
+	const std::string& selectedRelativePath,
+	const std::vector<StorageFolder^>& supplementalFolders)
+{
+	if (!m_instance || !selectedFolder)
+		return false;
+	std::vector<void*> folders;
+	folders.reserve(supplementalFolders.size());
+	for (const auto& folder : supplementalFolders)
+	{
+		if (folder)
+			folders.emplace_back(reinterpret_cast<void*>(folder));
+	}
+	const CemuEmbedBrokeredStorage storage{
+		sizeof(storage), CEMU_EMBED_BROKERED_STORAGE_VERSION, this,
+		EnumerateBrokeredFolder, OpenBrokeredFile, ReadBrokeredStream,
+		CloseBrokeredStream, BrokeredProgress, nullptr,
+		OpenBrokeredRelativeFile
+	};
+	return CemuEmbed_LaunchGameFromBrokeredFolders(m_instance,
+		reinterpret_cast<void*>(selectedFolder),
+		selectedRelativePath.empty() ? nullptr : selectedRelativePath.c_str(),
+		folders.empty() ? nullptr : folders.data(), static_cast<uint32_t>(folders.size()),
+		&storage) == CEMU_EMBED_OK;
+}
+
 bool Cemu_UWP_HostMain::InstallTitle(StorageFolder^ titleFolder,
 	CemuEmbedInstallType expectedType, uint64_t* installedBaseTitleId)
 {
 	if (!m_instance || !titleFolder) return false;
 	TitleInstallBroker broker;
+	broker.directCopy.host = this;
 	broker.progressCallback = m_progressCallback;
 	const CemuEmbedBrokeredStorage storage{
 		sizeof(storage), CEMU_EMBED_BROKERED_STORAGE_VERSION, &broker,
 		EnumerateCachedTitleFolder, OpenBrokeredFile, ReadBrokeredStream,
-		CloseBrokeredStream, CachedTitleProgress, CopyCachedTitleFile
+		CloseBrokeredStream, CachedTitleProgress, CopyCachedTitleFile,
+		OpenBrokeredRelativeFile
 	};
 	return CemuEmbed_InstallTitleFromBrokeredFolder(m_instance,
 		reinterpret_cast<void*>(titleFolder), &storage, expectedType,
@@ -374,14 +436,40 @@ bool Cemu_UWP_HostMain::LaunchInstalledTitle(uint64_t baseTitleId)
 		CemuEmbed_LaunchInstalledTitle(m_instance, baseTitleId) == CEMU_EMBED_OK;
 }
 
+bool Cemu_UWP_HostMain::DeleteInstalledTitle(uint64_t baseTitleId,
+	uint32_t* removedInstallFolderCount)
+{
+	return m_instance && CemuEmbed_DeleteInstalledTitle(m_instance, baseTitleId,
+		removedInstallFolderCount) == CEMU_EMBED_OK;
+}
+
+bool Cemu_UWP_HostMain::DownloadGraphicPacks(uint32_t* downloadedPackCount,
+	bool* alreadyCurrent)
+{
+	int32_t current{};
+	const bool result = m_instance && CemuEmbed_DownloadGraphicPacks(m_instance,
+		downloadedPackCount, &current) == CEMU_EMBED_OK;
+	if (alreadyCurrent)
+		*alreadyCurrent = current != 0;
+	return result;
+}
+
+bool Cemu_UWP_HostMain::ClearShaderCaches(uint32_t* removedEntryCount)
+{
+	return m_instance && CemuEmbed_ClearShaderCaches(m_instance,
+		removedEntryCount) == CEMU_EMBED_OK;
+}
+
 bool Cemu_UWP_HostMain::InstallGraphicPacks(StorageFolder^ graphicPacksFolder,
 	uint32_t* importedPackCount)
 {
 	if (!m_instance || !graphicPacksFolder) return false;
+	DirectCopyBroker broker{ this };
 	const CemuEmbedBrokeredStorage storage{
-		sizeof(storage), CEMU_EMBED_BROKERED_STORAGE_VERSION, this,
+		sizeof(storage), CEMU_EMBED_BROKERED_STORAGE_VERSION, &broker,
 		EnumerateBrokeredFolder, OpenBrokeredFile, ReadBrokeredStream,
-		CloseBrokeredStream, BrokeredProgress, nullptr
+		CloseBrokeredStream, DirectCopyBrokeredProgress, CopyBrokeredFileToCache,
+		OpenBrokeredRelativeFile
 	};
 	return CemuEmbed_InstallGraphicPacksFromBrokeredFolder(m_instance,
 		reinterpret_cast<void*>(graphicPacksFolder), &storage,
@@ -592,6 +680,46 @@ CemuEmbedResult __cdecl Cemu_UWP_HostMain::OpenBrokeredFile(void*, void* fileHan
 	catch (...) { return CEMU_EMBED_STORAGE_FAILED; }
 }
 
+CemuEmbedResult __cdecl Cemu_UWP_HostMain::OpenBrokeredRelativeFile(void* userData,
+	void* folderHandle, const char* relativePath, void** streamHandle)
+{
+	if (!folderHandle || !relativePath || !*relativePath || !streamHandle)
+		return CEMU_EMBED_INVALID_ARGUMENT;
+	try
+	{
+		auto currentFolder = reinterpret_cast<StorageFolder^>(folderHandle);
+		std::string path(relativePath);
+		std::replace(path.begin(), path.end(), '\\', '/');
+		if (path.empty() || path.front() == '/' || path.find(':') != std::string::npos)
+			return CEMU_EMBED_INVALID_ARGUMENT;
+
+		size_t begin{};
+		for (;;)
+		{
+			const auto end = path.find('/', begin);
+			const auto length = (end == std::string::npos ? path.size() : end) - begin;
+			if (length == 0)
+				return CEMU_EMBED_INVALID_ARGUMENT;
+			const std::string component = path.substr(begin, length);
+			if (component == "." || component == "..")
+				return CEMU_EMBED_INVALID_ARGUMENT;
+			const auto name = FromUtf8(component.c_str());
+			if (end == std::string::npos)
+			{
+				auto file = create_task(currentFolder->GetFileAsync(name)).get();
+				auto properties = create_task(file->GetBasicPropertiesAsync()).get();
+				// Direct virtual-file reads may seek in either direction, so do not
+				// request sequential read-ahead from the storage broker.
+				BrokeredFile brokeredFile{file, properties->Size, false};
+				return OpenBrokeredFile(userData, &brokeredFile, streamHandle);
+			}
+			currentFolder = create_task(currentFolder->GetFolderAsync(name)).get();
+			begin = end + 1;
+		}
+	}
+	catch (...) { return CEMU_EMBED_STORAGE_FAILED; }
+}
+
 CemuEmbedResult __cdecl Cemu_UWP_HostMain::ReadBrokeredStream(void*, void* streamHandle, uint64_t offset,
 	uint8_t* buffer, uint32_t bufferSize, uint32_t* bytesRead)
 {
@@ -628,9 +756,9 @@ CemuEmbedResult __cdecl Cemu_UWP_HostMain::ReadBrokeredStream(void*, void* strea
 			reader->ReadBytes(Platform::ArrayReference<unsigned char>(buffer, count));
 		*bytesRead = count;
 
-		// Bound the pipeline to a single Cemu staging block. Cemu's installation
-		// path uses 2 MiB blocks, which is large enough to amortize Xbox broker
-		// latency without the memory pressure caused by deeper queues.
+		// Only the compatibility fallback reaches this point. Keep one caller
+		// supplied request in flight; the normal CopyAsync path delegates transfer
+		// sizing entirely to Windows and the underlying storage device.
 		const uint64_t nextOffset = offset + count;
 		if (brokeredStream->sequentialPrefetch && count && nextOffset < brokeredStream->length)
 		{
@@ -662,6 +790,24 @@ void __cdecl Cemu_UWP_HostMain::BrokeredProgress(void* userData, uint64_t bytesC
 	auto self = static_cast<Cemu_UWP_HostMain*>(userData);
 	if (self && self->m_progressCallback)
 		self->m_progressCallback(bytesCopied, totalBytes, relativePath ? relativePath : "");
+}
+
+CemuEmbedResult __cdecl Cemu_UWP_HostMain::CopyBrokeredFileToCache(void* userData,
+	void* fileHandle, const char* destinationPathUtf8)
+{
+	if (!userData)
+		return CEMU_EMBED_INVALID_ARGUMENT;
+	auto& broker = *static_cast<DirectCopyBroker*>(userData);
+	return CopyFileUsingStorageBroker(broker, fileHandle, destinationPathUtf8);
+}
+
+void __cdecl Cemu_UWP_HostMain::DirectCopyBrokeredProgress(void* userData,
+	uint64_t bytesCopied, uint64_t totalBytes, const char* relativePath)
+{
+	auto broker = static_cast<DirectCopyBroker*>(userData);
+	if (broker && broker->host && broker->host->m_progressCallback)
+		broker->host->m_progressCallback(bytesCopied, totalBytes,
+			relativePath ? relativePath : "");
 }
 
 void Cemu_UWP_HostMain::Pump() { if (m_instance) CemuEmbed_Pump(m_instance); }

@@ -200,6 +200,69 @@
                    Foreground="#8ABED8CE" />
       </StackPanel>
 
+      <!-- Shown only while a brokered external title is being staged. Keeping
+           it above the SwapChainPanel prevents the blank presentation surface
+           from looking like a frozen or failed launch. -->
+      <Grid x:Name="externalLoadingOverlay"
+            Canvas.ZIndex="25"
+            Background="#E60A241B"
+            Visibility="Collapsed"
+            IsHitTestVisible="True">
+        <Border Width="430"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="#F212382C"
+                BorderBrush="#FF3B7A66"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="32,28">
+          <StackPanel HorizontalAlignment="Stretch">
+            <Grid HorizontalAlignment="Center"
+                  Width="72"
+                  Height="72"
+                  Margin="0,0,0,18">
+              <ProgressRing x:Name="externalLoadingRing"
+                            Width="72"
+                            Height="72"
+                            IsActive="False"
+                            Foreground="{StaticResource AccentBlueBrush}" />
+              <FontIcon Glyph="&#xE768;"
+                        FontSize="25"
+                        Foreground="White"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center" />
+            </Grid>
+            <TextBlock x:Name="externalLoadingTitle"
+                       Text="Loading external game"
+                       FontSize="22"
+                       FontWeight="SemiBold"
+                       Foreground="White"
+                       TextAlignment="Center" />
+            <TextBlock x:Name="externalLoadingDetail"
+                       Text="Preparing external storage..."
+                       FontSize="14"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       TextAlignment="Center"
+                       TextTrimming="CharacterEllipsis"
+                       Margin="0,8,0,16" />
+            <ProgressBar x:Name="externalLoadingProgress"
+                         Minimum="0"
+                         Maximum="100"
+                         Value="0"
+                         Height="10"
+                         Foreground="{StaticResource AccentBlueBrush}"
+                         Background="#FF082018" />
+            <TextBlock x:Name="externalLoadingPercent"
+                       Text="0%"
+                       FontSize="28"
+                       FontWeight="SemiBold"
+                       Foreground="White"
+                       TextAlignment="Center"
+                       Margin="0,12,0,0" />
+          </StackPanel>
+        </Border>
+      </Grid>
+
       <!-- Optional in-game Wii U GamePad pointer. This is not used for XAML
            navigation; L+R toggles it only after a title has started. -->
       <!-- Keep the pointer hotspot at the upper-left corner. A Path is used
@@ -365,18 +428,6 @@
                                 Foreground="White"
                                 IsEnabled="False"
                                 Click="InstallContent_Click" />
-                  <AppBarButton x:Name="openGameFileButton"
-                                Label="Open game file"
-                                Icon="OpenFile"
-                                Foreground="White"
-                                IsEnabled="False"
-                                Click="OpenGameFile_Click" />
-                  <AppBarButton x:Name="openGameFolderButton"
-                                Label="Open game folder"
-                                Icon="Folder"
-                                Foreground="White"
-                                IsEnabled="False"
-                                Click="OpenGameFolder_Click" />
                   <AppBarButton x:Name="importKeysButton"
                                 Label="Import keys.txt"
                                 Icon="Document"
@@ -389,12 +440,24 @@
                                 Foreground="White"
                                 IsEnabled="False"
                                 Click="RefreshLibrary_Click" />
-                  <AppBarButton x:Name="installGraphicPacksButton"
-                                Label="Import enhancements"
-                                Icon="Manage"
+                  <AppBarButton x:Name="scanExternalStorageButton"
+                                Label="Choose external storage"
+                                Icon="Refresh"
                                 Foreground="White"
                                 IsEnabled="False"
-                                Click="InstallGraphicPacks_Click" />
+                                Click="ScanExternalStorage_Click" />
+                  <AppBarButton x:Name="downloadGraphicPacksButton"
+                                Label="Download graphic packs"
+                                Icon="Download"
+                                Foreground="White"
+                                IsEnabled="False"
+                                Click="DownloadGraphicPacks_Click" />
+                  <AppBarButton x:Name="clearShaderCacheButton"
+                                Label="Clear shader cache"
+                                Icon="Clear"
+                                Foreground="White"
+                                IsEnabled="False"
+                                Click="ClearShaderCache_Click" />
                 </CommandBar>
               </Grid>
 
@@ -421,16 +484,6 @@
                     <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#55366B58" />
                     <SolidColorBrush x:Key="ListViewItemForegroundSelected" Color="White" />
                   </ListView.Resources>
-                  <ListView.ItemTemplate>
-                    <DataTemplate>
-                      <TextBlock Text="{Binding}"
-                                 TextWrapping="Wrap"
-                                 FontFamily="Consolas"
-                                 FontSize="14"
-                                 Foreground="White"
-                                 Margin="2" />
-                    </DataTemplate>
-                  </ListView.ItemTemplate>
                 </ListView>
               </Border>
             </Grid>

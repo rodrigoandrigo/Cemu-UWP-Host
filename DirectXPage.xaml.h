@@ -26,11 +26,11 @@ namespace Cemu_UWP_Host
 		void OnBackRequested(Platform::Object^ sender,
 			Windows::UI::Core::BackRequestedEventArgs^ args);
 		void InstallContent_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
-		void OpenGameFile_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
-		void OpenGameFolder_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void ImportKeys_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
-		void InstallGraphicPacks_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void DownloadGraphicPacks_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void ClearShaderCache_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void RefreshLibrary_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
+		void ScanExternalStorage_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ args);
 		void InstalledGames_SelectionChanged(Platform::Object^ sender,
 			Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ args);
 		void InstalledGames_ItemClick(Platform::Object^ sender,
@@ -58,12 +58,15 @@ namespace Cemu_UWP_Host
 		void SetTabsVisible(bool visible);
 		void SetGettingStartedExpanded(bool expanded);
 		void SetGamePresentation(bool running);
+		void SetExternalLoadingVisible(bool visible);
 		void AppendError(const std::string& message);
 		void OnCemuStateChanged(CemuEmbedState state);
 		void OnBrokeredProgress(uint64_t bytesCopied, uint64_t totalBytes, const std::string& relativePath);
 		void BeginInstall();
 		void BeginExternalLaunch(std::function<bool()> launchOperation);
-		void RefreshLibrary(bool scanLocalInstallFolder = false);
+		void BeginExternalStorageScan(Windows::Storage::StorageFolder^ storageRoot);
+		void RefreshLibrary(bool scanLocalFolder = false);
+		void DeleteInstalledTitle(uint64_t titleId);
 		void SetLibraryActionsEnabled(bool enabled);
 		void UpdateStartButton();
 		int FindInstalledTitleIndex(uint64_t titleId) const;
@@ -78,6 +81,7 @@ namespace Cemu_UWP_Host
 		std::shared_ptr<DX::DeviceResources> m_deviceResources;
 		std::shared_ptr<Cemu_UWP_HostMain> m_main;
 		std::vector<InstalledTitle> m_installedTitles;
+		std::vector<InstalledTitle> m_externalTitles;
 		std::vector<DimensionsFigure> m_dimensionsFigures;
 		Windows::Foundation::EventRegistrationToken m_renderingToken{};
 		Windows::Foundation::EventRegistrationToken m_gamepadAddedToken{};
@@ -95,6 +99,7 @@ namespace Cemu_UWP_Host
 		bool m_libraryBusy = false;
 		bool m_gamepadProfileReady = false;
 		bool m_gameRunning = false;
+		bool m_externalLoadingVisible = false;
 		bool m_virtualMouseEnabled = false;
 		bool m_virtualMouseChordHeld = false;
 		bool m_optionsChordHeld = false;

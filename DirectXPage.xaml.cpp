@@ -6,6 +6,7 @@
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <tuple>
 
 using namespace Cemu_UWP_Host;
 using namespace concurrency;
@@ -25,7 +26,6 @@ namespace
 const auto VisibleValue = static_cast<Windows::UI::Xaml::Visibility>(0);
 const auto CollapsedValue = static_cast<Windows::UI::Xaml::Visibility>(1);
 constexpr wchar_t LocalInstallFolderName[] = L"GamesToInstall";
-constexpr wchar_t LocalInstallMarkerName[] = L"cemu-installed.txt";
 constexpr wchar_t LocalGraphicPackMarkerName[] = L"cemu-graphic-pack-installed.txt";
 
 Platform::String^ WinRtString(const wchar_t* value)
@@ -53,14 +53,14 @@ struct LocalGameFile
 	std::string name;
 	std::string path;
 	std::string format;
+	std::string brokeredRelativePath;
+	StorageFolder^ brokeredTitleFolder{ nullptr };
 };
 
 struct LocalInstallScanResult
 {
 	uint32_t discovered{};
-	uint32_t installed{};
 	uint32_t failed{};
-	uint32_t alreadyProcessed{};
 	uint32_t markerWarnings{};
 	uint32_t graphicPacksDiscovered{};
 	uint32_t graphicPacksImported{};
@@ -68,6 +68,13 @@ struct LocalInstallScanResult
 	uint32_t graphicPacksAlreadyProcessed{};
 	uint32_t enabledGraphicPacks{};
 	std::vector<LocalGameFile> localGameFiles;
+};
+
+struct ExternalStorageScanResult
+{
+	uint32_t storageCount{};
+	uint32_t inaccessibleFolderCount{};
+	std::vector<LocalGameFile> gameFiles;
 };
 
 bool IsSupportedLocalGameExtension(std::string extension)
@@ -117,8 +124,8 @@ StorageFolder^ GetOrCreateLocalInstallFolder()
 			L"Copy each extracted Wii U base game, update, or DLC into its own subfolder.\r\n"
 			L"Every title folder must contain code, content, and meta.\r\n"
 			L"Graphic Pack folders are detected by their rules.txt file.\r\n"
-			L"In the app, select Scan local folder to detect and install the content.\r\n"
-			L"Successful sources receive a cemu-installed marker. Delete that marker to reinstall them.\r\n"))).get();
+			L"In the app, select Scan local folder to detect and list the content.\r\n"
+			L"Games remain in this folder and launch directly from it; the scan does not install them.\r\n"))).get();
 	}
 	return root;
 }
@@ -151,8 +158,7 @@ bool IsGraphicPackCollection(StorageFolder^ folder)
 		_wcsicmp(name, L"downloadedGraphicPacks") == 0;
 }
 
-void FindLocalInstallContent(StorageFolder^ folder,
-	std::vector<StorageFolder^>& titles, uint32_t& alreadyProcessed,
+void FindLocalStorageContent(StorageFolder^ folder,
 	std::vector<StorageFolder^>& graphicPacks,
 	uint32_t& graphicPacksAlreadyProcessed,
 	std::vector<LocalGameFile>& localGameFiles)
@@ -161,13 +167,21 @@ void FindLocalInstallContent(StorageFolder^ folder,
 		return;
 	if (IsExtractedInstallTitle(folder))
 	{
-		if (create_task(folder->TryGetItemAsync(
-			WinRtString(LocalInstallMarkerName))).get())
-			++alreadyProcessed;
-		else
-			titles.emplace_back(folder);
+		const auto path = ToUtf8(folder->Path);
+		if (!path.empty())
+			localGameFiles.push_back({ StableLocalGameId(path), ToUtf8(folder->Name),
+				path, "EXTRACTED" });
 		// code/content/meta can contain many directories. Once a title root is
 		// recognized, do not recurse into its payload.
+		return;
+	}
+	if (dynamic_cast<StorageFile^>(
+		create_task(folder->TryGetItemAsync(WinRtString(L"title.tmd"))).get()))
+	{
+		const auto path = ToUtf8(folder->Path);
+		if (!path.empty())
+			localGameFiles.push_back({ StableLocalGameId(path), ToUtf8(folder->Name),
+				path, "NUS TITLE" });
 		return;
 	}
 	if (IsGraphicPackCollection(folder))
@@ -209,8 +223,91 @@ void FindLocalInstallContent(StorageFolder^ folder,
 
 	const auto children = create_task(folder->GetFoldersAsync()).get();
 	for (const auto& child : children)
-		FindLocalInstallContent(child, titles, alreadyProcessed, graphicPacks,
+		FindLocalStorageContent(child, graphicPacks,
 			graphicPacksAlreadyProcessed, localGameFiles);
+}
+
+void FindExternalStorageContent(StorageFolder^ folder,
+	ExternalStorageScanResult& result)
+{
+	if (!folder || IsGraphicPackCollection(folder))
+		return;
+	try
+	{
+		const auto folderPath = ToUtf8(folder->Path);
+		if (IsExtractedInstallTitle(folder))
+		{
+			if (!folderPath.empty())
+			{
+				result.gameFiles.push_back({ StableLocalGameId(folderPath),
+					ToUtf8(folder->Name), folderPath, "EXTRACTED", {}, folder });
+			}
+			return;
+		}
+
+		if (dynamic_cast<StorageFile^>(
+			create_task(folder->TryGetItemAsync(WinRtString(L"title.tmd"))).get()))
+		{
+			if (!folderPath.empty())
+			{
+				result.gameFiles.push_back({ StableLocalGameId(folderPath),
+					ToUtf8(folder->Name), folderPath, "NUS TITLE", {}, folder });
+			}
+			return;
+		}
+
+		const auto files = create_task(folder->GetFilesAsync()).get();
+		for (const auto& file : files)
+		{
+			auto extension = ToUtf8(file->FileType);
+			if (!IsSupportedLocalGameExtension(extension))
+				continue;
+			std::transform(extension.begin(), extension.end(), extension.begin(),
+				[](unsigned char value) { return static_cast<char>(std::toupper(value)); });
+			const auto path = ToUtf8(file->Path);
+			if (path.empty())
+				continue;
+			result.gameFiles.push_back({ StableLocalGameId(path), ToUtf8(file->Name),
+				path, extension, ToUtf8(file->Name), folder });
+		}
+
+		const auto children = create_task(folder->GetFoldersAsync()).get();
+		for (const auto& child : children)
+			FindExternalStorageContent(child, result);
+	}
+	catch (Platform::Exception^)
+	{
+		++result.inaccessibleFolderCount;
+	}
+	catch (...)
+	{
+		++result.inaccessibleFolderCount;
+	}
+}
+
+void RemoveDuplicateExternalPaths(ExternalStorageScanResult& result)
+{
+	auto comparePaths = [](const std::string& left, const std::string& right)
+	{
+		std::string normalizedLeft = left;
+		std::string normalizedRight = right;
+		std::transform(normalizedLeft.begin(), normalizedLeft.end(), normalizedLeft.begin(),
+			[](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+		std::transform(normalizedRight.begin(), normalizedRight.end(), normalizedRight.begin(),
+			[](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+		return normalizedLeft < normalizedRight;
+	};
+	std::sort(result.gameFiles.begin(), result.gameFiles.end(),
+		[&comparePaths](const LocalGameFile& left, const LocalGameFile& right)
+		{
+			return comparePaths(left.path, right.path);
+		});
+	result.gameFiles.erase(std::unique(result.gameFiles.begin(), result.gameFiles.end(),
+		[&comparePaths](const LocalGameFile& left, const LocalGameFile& right)
+		{
+			return !comparePaths(left.path, right.path) &&
+				!comparePaths(right.path, left.path);
+		}), result.gameFiles.end());
 }
 
 Platform::String^ FromUtf8(const std::string& value)
@@ -419,7 +516,6 @@ void DirectXPage::InitializeEmulator(float width, float height)
 
 DirectXPage::~DirectXPage()
 {
-	SetSystemPointerForUi(true);
 	CompositionTarget::Rendering -= m_renderingToken;
 	Gamepad::GamepadAdded -= m_gamepadAddedToken;
 	Gamepad::GamepadRemoved -= m_gamepadRemovedToken;
@@ -440,9 +536,9 @@ DirectXPage::~DirectXPage()
 
 void DirectXPage::OnRendering(Platform::Object^, Platform::Object^)
 {
-	// Xbox can recreate its controller-driven system cursor while pointer mode
-	// remains Auto. Reassert the hidden cursor for every presented UI frame so
-	// it cannot reappear over a running title.
+	// Xbox can recreate its controller-driven system cursor after focus changes
+	// or an error dialog. Reassert the hidden cursor while a title owns the
+	// presentation, but keep it available for the navigable library.
 	if (m_gameRunning)
 		SetSystemPointerForUi(false);
 	if (m_main) m_main->Pump();
@@ -538,77 +634,6 @@ void DirectXPage::InstallContent_Click(Platform::Object^, RoutedEventArgs^)
 	BeginInstall();
 }
 
-void DirectXPage::OpenGameFile_Click(Platform::Object^, RoutedEventArgs^)
-{
-	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
-		return;
-	auto picker = ref new FileOpenPicker();
-	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
-	for (const auto extension : { L".wud", L".wux", L".iso", L".wua",
-		L".wuhb", L".rpx", L".elf" })
-		picker->FileTypeFilter->Append(ref new Platform::String(extension));
-	Platform::WeakReference weakThis(this);
-	create_task(picker->PickSingleFileAsync()).then([weakThis](StorageFile^ file)
-	{
-		auto page = weakThis.Resolve<DirectXPage>();
-		if (!page || !file) return;
-		page->m_libraryBusy = true;
-		page->SetLibraryActionsEnabled(false);
-		page->startButton->IsEnabled = false;
-		page->launchStatus->Text = "Copying selected game file...";
-		auto cache = ApplicationData::Current->LocalCacheFolder;
-		create_task(cache->CreateFolderAsync("brokered-game-files",
-			CreationCollisionOption::OpenIfExists)).then([file](StorageFolder^ folder)
-		{
-			return create_task(file->CopyAsync(folder, file->Name,
-				NameCollisionOption::ReplaceExisting));
-		}).then([weakThis](task<StorageFile^> copyTask)
-		{
-			auto page = weakThis.Resolve<DirectXPage>();
-			if (!page) return;
-			try
-			{
-				auto copiedFile = copyTask.get();
-				page->m_libraryBusy = false;
-				const auto main = page->m_main;
-				page->BeginExternalLaunch([main, copiedFile]()
-				{
-					return main && main->LaunchGameFile(copiedFile);
-				});
-			}
-			catch (Platform::Exception^ exception)
-			{
-				page->m_libraryBusy = false;
-				page->SetLibraryActionsEnabled(true);
-				page->launchStatus->Text = "Could not copy the selected game file";
-				page->AppendError("Game file copy failed: " +
-					std::to_string(exception->HResult));
-				page->UpdateStartButton();
-			}
-		}, task_continuation_context::use_current());
-	}, task_continuation_context::use_current());
-}
-
-void DirectXPage::OpenGameFolder_Click(Platform::Object^, RoutedEventArgs^)
-{
-	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
-		return;
-	auto picker = ref new FolderPicker();
-	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
-	picker->FileTypeFilter->Append("*");
-	Platform::WeakReference weakThis(this);
-	create_task(picker->PickSingleFolderAsync()).then([weakThis](StorageFolder^ folder)
-	{
-		auto page = weakThis.Resolve<DirectXPage>();
-		if (!page || !folder) return;
-		const auto main = page->m_main;
-		page->BeginExternalLaunch([main, folder]()
-		{
-			return main && main->LaunchGame(folder);
-		});
-	}, task_continuation_context::use_current());
-}
-
 void DirectXPage::ImportKeys_Click(Platform::Object^, RoutedEventArgs^)
 {
 	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
@@ -654,40 +679,92 @@ void DirectXPage::ImportKeys_Click(Platform::Object^, RoutedEventArgs^)
 	}, task_continuation_context::use_current());
 }
 
-void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
+void DirectXPage::DownloadGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 {
-	if (!m_main || !m_cemuReady || m_libraryBusy)
+	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
 		return;
-	auto picker = ref new FolderPicker();
-	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
-	picker->FileTypeFilter->Append("*");
+	m_libraryBusy = true;
+	SetLibraryActionsEnabled(false);
+	startButton->IsEnabled = false;
+	launchStatus->Text = "Downloading Graphic Packs...";
+	std::vector<uint64_t> titleIds;
+	for (const auto& title : m_installedTitles)
+	{
+		if (title.localGamePath.empty())
+			titleIds.push_back(title.titleId);
+	}
+	const auto main = m_main;
 	Platform::WeakReference weakThis(this);
-	create_task(picker->PickSingleFolderAsync()).then([weakThis](StorageFolder^ folder)
+	create_task([main, titleIds]()
+	{
+		uint32_t downloaded{};
+		bool alreadyCurrent{};
+		if (!main || !main->DownloadGraphicPacks(&downloaded, &alreadyCurrent))
+			return std::tuple<bool, bool, uint32_t, uint32_t>{ false, false, 0, 0 };
+		uint32_t enabled{};
+		for (const auto titleId : titleIds)
+		{
+			uint32_t affected{};
+			if (main->SetGraphicPacksEnabledForTitle(titleId, true, &affected))
+				enabled += affected;
+		}
+		return std::tuple<bool, bool, uint32_t, uint32_t>{
+			true, alreadyCurrent, downloaded, enabled };
+	}).then([weakThis](std::tuple<bool, bool, uint32_t, uint32_t> result)
 	{
 		auto page = weakThis.Resolve<DirectXPage>();
-		if (!page || !folder) return;
+		if (!page) return;
+		page->m_libraryBusy = false;
+		if (!std::get<0>(result))
+		{
+			page->SetLibraryActionsEnabled(true);
+			page->launchStatus->Text = "Failed to download Graphic Packs; see Help and errors";
+			page->SetTabsVisible(true);
+			page->toolTabs->SelectedIndex = 3;
+			page->UpdateStartButton();
+			return;
+		}
+		std::ostringstream status;
+		if (std::get<1>(result))
+			status << "Graphic Packs are already up to date";
+		else
+			status << std::get<2>(result) << " Graphic Pack(s) downloaded";
+		if (std::get<3>(result))
+			status << "; " << std::get<3>(result) << " enabled";
+		page->launchStatus->Text = FromUtf8(status.str());
+		page->RefreshLibrary();
+	}, task_continuation_context::use_current());
+}
+
+void DirectXPage::ClearShaderCache_Click(Platform::Object^, RoutedEventArgs^)
+{
+	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
+		return;
+	auto dialog = ref new ContentDialog();
+	dialog->Title = ref new Platform::String(L"Clear shader cache?");
+	dialog->Content = ref new Platform::String(
+		L"Cached shaders for every game will be removed. Games, saves, settings, and Graphic Packs are kept. The next launch rebuilds only the shaders it needs.");
+	dialog->PrimaryButtonText = ref new Platform::String(L"Clear cache");
+	dialog->CloseButtonText = ref new Platform::String(L"Cancel");
+	Platform::WeakReference weakThis(this);
+	create_task(dialog->ShowAsync()).then([weakThis](ContentDialogResult result)
+	{
+		if (result != ContentDialogResult::Primary)
+			return;
+		auto page = weakThis.Resolve<DirectXPage>();
+		if (!page || !page->m_main || page->m_libraryBusy || page->m_gameRunning)
+			return;
 		page->m_libraryBusy = true;
 		page->SetLibraryActionsEnabled(false);
 		page->startButton->IsEnabled = false;
-		page->launchStatus->Text = "Importing graphic packs...";
-		std::vector<uint64_t> titleIds;
-		for (const auto& title : page->m_installedTitles)
-			titleIds.push_back(title.titleId);
+		page->launchStatus->Text = "Clearing shader cache...";
 		const auto main = page->m_main;
-		create_task([main, folder, titleIds]()
+		create_task([main]()
 		{
-			uint32_t imported{};
-			if (!main || !main->InstallGraphicPacks(folder, &imported))
-				return std::pair<uint32_t, uint32_t>{};
-			uint32_t enabled{};
-			for (const auto titleId : titleIds)
-			{
-				uint32_t affected{};
-				if (main->SetGraphicPacksEnabledForTitle(titleId, true, &affected))
-					enabled += affected;
-			}
-			return std::make_pair(imported, enabled);
-		}).then([weakThis](std::pair<uint32_t, uint32_t> result)
+			uint32_t removed{};
+			const bool succeeded = main && main->ClearShaderCaches(&removed);
+			return std::make_pair(succeeded, removed);
+		}).then([weakThis](std::pair<bool, uint32_t> result)
 		{
 			auto page = weakThis.Resolve<DirectXPage>();
 			if (!page) return;
@@ -695,18 +772,16 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 			page->SetLibraryActionsEnabled(true);
 			if (!result.first)
 			{
-				page->launchStatus->Text = "Failed to import graphic packs; see Help and errors";
+				page->launchStatus->Text = "Could not clear the shader cache; see Help and errors";
 				page->SetTabsVisible(true);
 				page->toolTabs->SelectedIndex = 3;
-				page->UpdateStartButton();
-				return;
 			}
-			std::ostringstream status;
-			status << result.first << " graphic pack(s) imported";
-			if (result.second)
-				status << "; " << result.second << " enabled";
-			page->launchStatus->Text = FromUtf8(status.str());
-			page->RefreshLibrary();
+			else
+			{
+				page->launchStatus->Text = FromUtf8(std::to_string(result.second) +
+					" shader-cache entr" + (result.second == 1 ? "y" : "ies") + " cleared");
+			}
+			page->UpdateStartButton();
 		}, task_continuation_context::use_current());
 	}, task_continuation_context::use_current());
 }
@@ -714,6 +789,133 @@ void DirectXPage::InstallGraphicPacks_Click(Platform::Object^, RoutedEventArgs^)
 void DirectXPage::RefreshLibrary_Click(Platform::Object^, RoutedEventArgs^)
 {
 	RefreshLibrary(true);
+}
+
+void DirectXPage::ScanExternalStorage_Click(Platform::Object^, RoutedEventArgs^)
+{
+	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
+		return;
+	auto picker = ref new FolderPicker();
+	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
+	picker->FileTypeFilter->Append("*");
+	Platform::WeakReference weakThis(this);
+	create_task(picker->PickSingleFolderAsync()).then([weakThis](StorageFolder^ storageRoot)
+	{
+		auto page = weakThis.Resolve<DirectXPage>();
+		if (page && storageRoot)
+			page->BeginExternalStorageScan(storageRoot);
+	}, task_continuation_context::use_current());
+}
+
+void DirectXPage::BeginExternalStorageScan(StorageFolder^ storageRoot)
+{
+	if (!storageRoot || !m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
+		return;
+	m_libraryBusy = true;
+	SetLibraryActionsEnabled(false);
+	startButton->IsEnabled = false;
+	launchStatus->Text = "Scanning selected external storage...";
+	Platform::WeakReference weakThis(this);
+	create_task([storageRoot]()
+	{
+		ExternalStorageScanResult scanResult{};
+		try
+		{
+			scanResult.storageCount = 1;
+			FindExternalStorageContent(storageRoot, scanResult);
+		}
+		catch (Platform::Exception^)
+		{
+			++scanResult.inaccessibleFolderCount;
+		}
+		catch (...)
+		{
+			++scanResult.inaccessibleFolderCount;
+		}
+		RemoveDuplicateExternalPaths(scanResult);
+		return scanResult;
+	}).then([weakThis](ExternalStorageScanResult scanResult)
+	{
+		auto page = weakThis.Resolve<DirectXPage>();
+		if (!page) return;
+		page->m_externalTitles.clear();
+		page->m_externalTitles.reserve(scanResult.gameFiles.size());
+		for (const auto& gameFile : scanResult.gameFiles)
+		{
+			InstalledTitle externalTitle{};
+			externalTitle.titleId = gameFile.id;
+			externalTitle.name = gameFile.name;
+			externalTitle.regionName = "External storage";
+			externalTitle.localGamePath = gameFile.path;
+			externalTitle.localGameFormat = gameFile.format;
+			externalTitle.brokeredRelativePath = gameFile.brokeredRelativePath;
+			externalTitle.brokeredTitleFolder = gameFile.brokeredTitleFolder;
+			externalTitle.isExternalStorage = true;
+			page->m_externalTitles.emplace_back(std::move(externalTitle));
+		}
+		page->m_selectedTitleId = 0;
+		if (scanResult.inaccessibleFolderCount)
+		{
+			page->AppendError("Some folders in the selected external storage could not be accessed and were skipped.");
+		}
+		page->m_libraryBusy = false;
+		page->RefreshLibrary();
+	}, task_continuation_context::use_current());
+}
+
+void DirectXPage::DeleteInstalledTitle(uint64_t titleId)
+{
+	if (!m_main || !m_cemuReady || m_libraryBusy || m_gameRunning)
+		return;
+	const int titleIndex = FindInstalledTitleIndex(titleId);
+	if (titleIndex < 0 || !m_installedTitles[titleIndex].localGamePath.empty())
+		return;
+	const std::string titleName = m_installedTitles[titleIndex].name;
+	auto dialog = ref new ContentDialog();
+	dialog->Title = ref new Platform::String(L"Delete installed game?");
+	dialog->Content = FromUtf8("Delete \"" + titleName +
+		"\" together with its installed update and DLC? Save data will be kept.");
+	dialog->PrimaryButtonText = ref new Platform::String(L"Delete game");
+	dialog->CloseButtonText = ref new Platform::String(L"Cancel");
+	Platform::WeakReference weakThis(this);
+	create_task(dialog->ShowAsync()).then([weakThis, titleId](ContentDialogResult result)
+	{
+		if (result != ContentDialogResult::Primary)
+			return;
+		auto page = weakThis.Resolve<DirectXPage>();
+		if (!page || !page->m_main || page->m_libraryBusy || page->m_gameRunning ||
+			page->FindInstalledTitleIndex(titleId) < 0)
+			return;
+		page->m_libraryBusy = true;
+		page->SetLibraryActionsEnabled(false);
+		page->startButton->IsEnabled = false;
+		page->launchStatus->Text = "Deleting installed game...";
+		const auto main = page->m_main;
+		create_task([main, titleId]()
+		{
+			uint32_t removed{};
+			const bool succeeded = main && main->DeleteInstalledTitle(titleId, &removed);
+			return std::make_pair(succeeded, removed);
+		}).then([weakThis](std::pair<bool, uint32_t> result)
+		{
+			auto page = weakThis.Resolve<DirectXPage>();
+			if (!page) return;
+			page->m_libraryBusy = false;
+			if (!result.first)
+			{
+				page->SetLibraryActionsEnabled(true);
+				page->launchStatus->Text = "Could not delete the installed game; see Help and errors";
+				page->SetTabsVisible(true);
+				page->toolTabs->SelectedIndex = 3;
+				page->UpdateStartButton();
+				return;
+			}
+			page->m_selectedTitleId = 0;
+			page->launchStatus->Text = FromUtf8(std::to_string(result.second) +
+				" installed content folder(s) deleted; saves were kept");
+			page->RefreshLibrary();
+		}, task_continuation_context::use_current());
+	}, task_continuation_context::use_current());
 }
 
 void DirectXPage::InstalledGames_SelectionChanged(Platform::Object^,
@@ -764,7 +966,8 @@ void DirectXPage::InstalledGames_ItemClick(Platform::Object^,
 	// transient focus visual.
 	for (unsigned int index = 0; index < installedGamesList->Items->Size; ++index)
 	{
-		if (installedGamesList->Items->GetAt(index) != args->ClickedItem)
+		auto item = safe_cast<ListViewItem^>(installedGamesList->Items->GetAt(index));
+		if (item != args->ClickedItem && item->Content != args->ClickedItem)
 			continue;
 		if (index < m_installedTitles.size())
 			m_selectedTitleId = m_installedTitles[index].titleId;
@@ -786,10 +989,35 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 	if (!selectedTitle.localGamePath.empty())
 	{
 		const auto main = m_main;
-		const auto path = selectedTitle.localGamePath;
-		BeginExternalLaunch([main, path]()
+		if (selectedTitle.isExternalStorage && selectedTitle.brokeredTitleFolder)
 		{
-			return main && main->LaunchGamePath(path);
+			const auto selectedFolder = selectedTitle.brokeredTitleFolder;
+			const auto selectedRelativePath = selectedTitle.brokeredRelativePath;
+			std::vector<StorageFolder^> supplementalFolders;
+			for (const auto& title : m_installedTitles)
+			{
+				if (title.isExternalStorage && title.brokeredTitleFolder &&
+					(title.localGameFormat == "EXTRACTED" || title.localGameFormat == "NUS TITLE"))
+					supplementalFolders.emplace_back(title.brokeredTitleFolder);
+			}
+			BeginExternalLaunch([main, selectedFolder, selectedRelativePath, supplementalFolders]()
+			{
+				return main && main->LaunchExternalGameFolders(selectedFolder,
+					selectedRelativePath, supplementalFolders);
+			});
+			return;
+		}
+		const auto path = selectedTitle.localGamePath;
+		std::vector<std::string> supplementalPaths;
+		for (const auto& title : m_installedTitles)
+		{
+			if (!title.localGamePath.empty() &&
+				title.isExternalStorage == selectedTitle.isExternalStorage)
+				supplementalPaths.emplace_back(title.localGamePath);
+		}
+		BeginExternalLaunch([main, path, supplementalPaths]()
+		{
+			return main && main->LaunchExternalGamePath(path, supplementalPaths);
 		});
 		return;
 	}
@@ -813,8 +1041,6 @@ void DirectXPage::StartGame_Click(Platform::Object^, RoutedEventArgs^)
 	SetGamePresentation(true);
 	startButton->IsEnabled = false;
 	SetLibraryActionsEnabled(false);
-	// The controller-driven system cursor is useful for the XAML library but
-	// must disappear before game input is handed exclusively to the emulator.
 	SetSystemPointerForUi(false);
 	// Begin every title with the optional pointer disabled. Games that need a
 	// Wii U GamePad pointer can enable it with L+R; A remains its left click.
@@ -1043,12 +1269,23 @@ void DirectXPage::BeginExternalLaunch(std::function<bool()> launchOperation)
 	m_gameRunning = true;
 	launchStatus->Text = "Preparing selected Wii U title...";
 	emulatorPlaceholder->Visibility = CollapsedValue;
+	SetExternalLoadingVisible(true);
 	FocusEmulatorInput();
 	Platform::WeakReference weakThis(this);
-	create_task(std::move(launchOperation)).then([weakThis](bool launched)
+	create_task(std::move(launchOperation)).then([weakThis](task<bool> launchTask)
 	{
+		bool launched = false;
+		try
+		{
+			launched = launchTask.get();
+		}
+		catch (...)
+		{
+			launched = false;
+		}
 		auto page = weakThis.Resolve<DirectXPage>();
 		if (!page) return;
+		page->SetExternalLoadingVisible(false);
 		if (launched)
 		{
 			page->launchStatus->Text = "Game running";
@@ -1068,62 +1305,34 @@ void DirectXPage::BeginExternalLaunch(std::function<bool()> launchOperation)
 	}, task_continuation_context::use_current());
 }
 
-void DirectXPage::RefreshLibrary(bool scanLocalInstallFolder)
+void DirectXPage::RefreshLibrary(bool scanLocalFolder)
 {
 	if (!m_main || !m_cemuReady || m_libraryBusy)
 		return;
 	m_libraryBusy = true;
 	SetLibraryActionsEnabled(false);
 	startButton->IsEnabled = false;
-	launchStatus->Text = scanLocalInstallFolder
+	launchStatus->Text = scanLocalFolder
 		? "Scanning LocalState\\GamesToInstall..."
 		: "Refreshing library...";
 	const auto main = m_main;
-	create_task([main, scanLocalInstallFolder]()
+	create_task([main, scanLocalFolder]()
 	{
 		LocalInstallScanResult scanResult{};
 		try
 		{
 			auto importFolder = GetOrCreateLocalInstallFolder();
-			if (importFolder && main)
+			if (importFolder)
 			{
-				std::vector<StorageFolder^> candidates;
 				std::vector<StorageFolder^> graphicPackCandidates;
-				FindLocalInstallContent(importFolder, candidates,
-					scanResult.alreadyProcessed, graphicPackCandidates,
+				FindLocalStorageContent(importFolder, graphicPackCandidates,
 					scanResult.graphicPacksAlreadyProcessed,
 					scanResult.localGameFiles);
-				scanResult.discovered = static_cast<uint32_t>(candidates.size());
+				scanResult.discovered = static_cast<uint32_t>(scanResult.localGameFiles.size());
 				scanResult.graphicPacksDiscovered =
 					static_cast<uint32_t>(graphicPackCandidates.size());
-				if (scanLocalInstallFolder)
+				if (scanLocalFolder && main)
 				{
-					for (const auto& candidate : candidates)
-					{
-						uint64_t baseTitleId{};
-						if (!main->InstallTitle(candidate, CEMU_EMBED_INSTALL_AUTO,
-							&baseTitleId))
-						{
-							++scanResult.failed;
-							continue;
-						}
-						++scanResult.installed;
-						try
-						{
-							auto marker = create_task(candidate->CreateFileAsync(
-								WinRtString(LocalInstallMarkerName),
-								CreationCollisionOption::ReplaceExisting)).get();
-							create_task(FileIO::WriteTextAsync(marker,
-								WinRtString(L"Installed by Cemu-UWP-Host. Delete this file to reinstall this source.\r\n"))).get();
-						}
-						catch (...)
-						{
-							// The title is already committed to the MLC. Report only the
-							// missing marker, which can cause it to be offered again.
-							++scanResult.markerWarnings;
-						}
-					}
-
 					for (const auto& graphicPack : graphicPackCandidates)
 					{
 						uint32_t imported{};
@@ -1151,12 +1360,12 @@ void DirectXPage::RefreshLibrary(bool scanLocalInstallFolder)
 		}
 		catch (Platform::Exception^)
 		{
-			if (scanLocalInstallFolder)
+			if (scanLocalFolder)
 				++scanResult.failed;
 		}
 		catch (...)
 		{
-			if (scanLocalInstallFolder)
+			if (scanLocalFolder)
 				++scanResult.failed;
 		}
 		auto titles = main ? main->GetInstalledTitles() : std::vector<InstalledTitle>{};
@@ -1174,7 +1383,7 @@ void DirectXPage::RefreshLibrary(bool scanLocalInstallFolder)
 			titles = main->GetInstalledTitles();
 		}
 		return std::make_pair(std::move(titles), scanResult);
-	}).then([this, scanLocalInstallFolder](
+	}).then([this, scanLocalFolder](
 		std::pair<std::vector<InstalledTitle>, LocalInstallScanResult> result)
 	{
 		auto titles = std::move(result.first);
@@ -1189,6 +1398,8 @@ void DirectXPage::RefreshLibrary(bool scanLocalInstallFolder)
 			localTitle.localGameFormat = localGame.format;
 			titles.emplace_back(std::move(localTitle));
 		}
+		for (const auto& externalTitle : m_externalTitles)
+			titles.emplace_back(externalTitle);
 		m_installedTitles = std::move(titles);
 		installedGamesList->Items->Clear();
 		for (const auto& title : m_installedTitles)
@@ -1197,28 +1408,79 @@ void DirectXPage::RefreshLibrary(bool scanLocalInstallFolder)
 			line << title.name;
 			if (!title.localGamePath.empty())
 			{
-				line << "\nLocal game file  |  Format: " << title.localGameFormat
-					<< "  |  Ready to launch from GamesToInstall";
-				installedGamesList->Items->Append(FromUtf8(line.str()));
-				continue;
+				line << "\n" << (title.isExternalStorage
+					? "External storage item"
+					: "Local game file")
+					<< "  |  Format: " << title.localGameFormat
+					<< (title.isExternalStorage
+						? (title.localGameFormat == "EXTRACTED"
+							? "  |  Mounted directly from external storage (not installed)"
+							: "  |  Extract this format to launch without internal staging")
+						: "  |  Ready to launch from GamesToInstall");
 			}
-			line << "\nTitle ID: " << std::uppercase << std::hex << std::setw(16)
-				<< std::setfill('0') << title.titleId << std::dec
-				<< "  |  Version: v" << title.effectiveVersion
-				<< " (base v" << title.baseVersion;
-			if (title.updateVersion)
-				line << ", update v" << title.updateVersion;
 			else
-				line << ", no update";
-			line << ")  |  DLC: ";
-			if (title.dlcCount)
-				line << title.dlcCount << " installed, v" << title.dlcVersion;
-			else
-				line << "not installed";
-			line << "  |  Region: " << title.regionName
-				<< "  |  Graphic packs: " << title.enabledGraphicPackCount
-				<< "/" << title.compatibleGraphicPackCount << " active";
-			installedGamesList->Items->Append(FromUtf8(line.str()));
+			{
+				line << "\nTitle ID: " << std::uppercase << std::hex << std::setw(16)
+					<< std::setfill('0') << title.titleId << std::dec
+					<< "  |  Version: v" << title.effectiveVersion
+					<< " (base v" << title.baseVersion;
+				if (title.updateVersion)
+					line << ", update v" << title.updateVersion;
+				else
+					line << ", no update";
+				line << ")  |  DLC: ";
+				if (title.dlcCount)
+					line << title.dlcCount << " installed, v" << title.dlcVersion;
+				else
+					line << "not installed";
+				line << "  |  Region: " << title.regionName
+					<< "  |  Graphic packs: " << title.enabledGraphicPackCount
+					<< "/" << title.compatibleGraphicPackCount << " active";
+			}
+
+			auto item = ref new ListViewItem();
+			item->HorizontalContentAlignment =
+				::Windows::UI::Xaml::HorizontalAlignment::Stretch;
+			auto row = ref new Grid();
+			auto textColumn = ref new ColumnDefinition();
+			textColumn->Width = GridLength(1.0,
+				::Windows::UI::Xaml::GridUnitType::Star);
+			row->ColumnDefinitions->Append(textColumn);
+			auto details = ref new TextBlock();
+			details->Text = FromUtf8(line.str());
+			details->TextWrapping = ::Windows::UI::Xaml::TextWrapping::Wrap;
+			details->FontFamily = ref new Windows::UI::Xaml::Media::FontFamily(L"Consolas");
+			details->FontSize = 14;
+			details->Foreground = ref new Windows::UI::Xaml::Media::SolidColorBrush(
+				Windows::UI::Colors::White);
+			details->Margin = Thickness(2);
+			row->Children->Append(details);
+			if (title.localGamePath.empty())
+			{
+				auto buttonColumn = ref new ColumnDefinition();
+				buttonColumn->Width = GridLength(1.0,
+					::Windows::UI::Xaml::GridUnitType::Auto);
+				row->ColumnDefinitions->Append(buttonColumn);
+				auto deleteButton = ref new Button();
+				deleteButton->Content = ref new Platform::String(L"Delete");
+				deleteButton->Margin = Thickness(12, 0, 2, 0);
+				deleteButton->VerticalAlignment =
+					::Windows::UI::Xaml::VerticalAlignment::Center;
+				deleteButton->IsEnabled = !m_gameRunning;
+				Grid::SetColumn(deleteButton, 1);
+				const uint64_t titleId = title.titleId;
+				Platform::WeakReference weakThis(this);
+				deleteButton->Click += ref new RoutedEventHandler(
+					[weakThis, titleId](Platform::Object^, RoutedEventArgs^)
+					{
+						auto page = weakThis.Resolve<DirectXPage>();
+						if (page)
+							page->DeleteInstalledTitle(titleId);
+					});
+				row->Children->Append(deleteButton);
+			}
+			item->Content = row;
+			installedGamesList->Items->Append(item);
 		}
 		const int restoredIndex = FindInstalledTitleIndex(m_selectedTitleId);
 		installedGamesList->SelectedIndex = restoredIndex;
@@ -1226,20 +1488,16 @@ void DirectXPage::RefreshLibrary(bool scanLocalInstallFolder)
 			m_selectedTitleId = 0;
 		m_libraryBusy = false;
 		SetLibraryActionsEnabled(true);
-		if (scanLocalInstallFolder)
+		if (scanLocalFolder)
 		{
 			std::ostringstream status;
 			status << "Local scan complete";
-			if (scanResult.installed)
-				status << "; " << scanResult.installed << " title item(s) installed";
 			if (!scanResult.localGameFiles.empty())
 				status << "; " << scanResult.localGameFiles.size()
-					<< " local game file(s) detected";
+					<< " local storage item(s) detected";
 			if (!scanResult.discovered && !scanResult.graphicPacksDiscovered &&
 				scanResult.localGameFiles.empty())
 				status << "; no new content found";
-			if (scanResult.alreadyProcessed)
-				status << "; " << scanResult.alreadyProcessed << " already processed";
 			if (scanResult.graphicPacksImported)
 				status << "; " << scanResult.graphicPacksImported << " Graphic Pack(s) imported";
 			if (scanResult.graphicPacksAlreadyProcessed)
@@ -1249,7 +1507,7 @@ void DirectXPage::RefreshLibrary(bool scanLocalInstallFolder)
 			if (scanResult.failed)
 			{
 				status << "; " << scanResult.failed << " failed";
-				AppendError("Some content in LocalState\\GamesToInstall could not be installed. Each source must be an extracted base game, update, or DLC with code, content, and meta folders.");
+				AppendError("Some content in LocalState\\GamesToInstall could not be scanned. Each source must be a supported game file, a title.tmd folder, or an extracted title with code, content, and meta folders.");
 			}
 			if (scanResult.graphicPackFailures)
 			{
@@ -1265,9 +1523,18 @@ void DirectXPage::RefreshLibrary(bool scanLocalInstallFolder)
 		}
 		else
 		{
-			launchStatus->Text = m_installedTitles.empty()
-				? "No games installed"
-				: (restoredIndex >= 0 ? "Ready to start" : "Select an installed game");
+			if (!m_externalTitles.empty())
+			{
+				launchStatus->Text = FromUtf8("External scan complete; " +
+					std::to_string(m_externalTitles.size()) +
+					" extracted title(s) ready to mount from external storage");
+			}
+			else
+			{
+				launchStatus->Text = m_installedTitles.empty()
+					? "No games installed"
+					: (restoredIndex >= 0 ? "Ready to start" : "Select an installed game");
+			}
 		}
 		UpdateStartButton();
 	}, task_continuation_context::use_current());
@@ -1277,11 +1544,11 @@ void DirectXPage::SetLibraryActionsEnabled(bool enabled)
 {
 	const bool canUse = enabled && m_cemuReady;
 	installContentButton->IsEnabled = canUse;
-	openGameFileButton->IsEnabled = canUse && !m_gameRunning;
-	openGameFolderButton->IsEnabled = canUse && !m_gameRunning;
 	importKeysButton->IsEnabled = canUse && !m_gameRunning;
 	refreshLibraryButton->IsEnabled = canUse;
-	installGraphicPacksButton->IsEnabled = canUse;
+	scanExternalStorageButton->IsEnabled = canUse && !m_gameRunning;
+	downloadGraphicPacksButton->IsEnabled = canUse && !m_gameRunning;
+	clearShaderCacheButton->IsEnabled = canUse && !m_gameRunning;
 	installedGamesList->IsEnabled = enabled;
 }
 
@@ -1481,8 +1748,6 @@ void DirectXPage::SetSystemPointerForUi(bool enabled)
 		}
 		else
 		{
-			// Save the UI cursor only on the first transition. If Xbox recreates a
-			// cursor later, discard it instead of replacing the cursor to restore.
 			if (!m_systemPointerHidden)
 				m_savedSystemPointerCursor = coreWindow->PointerCursor;
 			if (coreWindow->PointerCursor != nullptr)
@@ -1576,6 +1841,21 @@ void DirectXPage::SetGamePresentation(bool running)
 	Grid::SetRowSpan(emulatorViewport, 1);
 }
 
+void DirectXPage::SetExternalLoadingVisible(bool visible)
+{
+	m_externalLoadingVisible = visible;
+	externalLoadingOverlay->Visibility = visible ? VisibleValue : CollapsedValue;
+	externalLoadingRing->IsActive = visible;
+	if (!visible)
+		return;
+
+	externalLoadingProgress->Value = 0.0;
+	externalLoadingProgress->IsIndeterminate = false;
+	externalLoadingPercent->Text = "0%";
+	externalLoadingTitle->Text = "Loading external game";
+	externalLoadingDetail->Text = "Preparing external storage...";
+}
+
 void DirectXPage::AppendError(const std::string& message)
 {
 	auto text = FromUtf8(message);
@@ -1620,6 +1900,7 @@ void DirectXPage::OnCemuStateChanged(CemuEmbedState state)
 			if (state != CEMU_EMBED_STATE_READY)
 			{
 				m_gameRunning = false;
+				SetExternalLoadingVisible(false);
 				SetGamePresentation(false);
 				m_performanceMetricsVisible = false;
 				metricsButtonText->Text = "Show metrics";
@@ -1868,19 +2149,60 @@ void DirectXPage::TryConfigureDefaultGamepad()
 	UpdateGamepadStatus();
 }
 
-void DirectXPage::OnBrokeredProgress(uint64_t bytesCopied, uint64_t totalBytes, const std::string&)
+void DirectXPage::OnBrokeredProgress(uint64_t bytesCopied, uint64_t totalBytes, const std::string& path)
 {
+	if (totalBytes == 0)
+	{
+		const auto detail = path.empty() ? "Indexing external title folders..." : path;
+		auto text = FromUtf8(detail);
+		create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Normal,
+			ref new DispatchedHandler([this, text]()
+			{
+				launchStatus->Text = text;
+				if (!m_externalLoadingVisible)
+					return;
+				externalLoadingTitle->Text = "Preparing external game";
+				externalLoadingDetail->Text = text;
+				externalLoadingProgress->IsIndeterminate = true;
+				externalLoadingPercent->Text = "...";
+			})));
+		return;
+	}
+	if (path == "External title mounted")
+	{
+		auto text = FromUtf8(path);
+		create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Normal,
+			ref new DispatchedHandler([this, text]()
+			{
+				launchStatus->Text = text;
+				if (!m_externalLoadingVisible)
+					return;
+				externalLoadingProgress->IsIndeterminate = false;
+				externalLoadingProgress->Value = 100.0;
+				externalLoadingPercent->Text = "100%";
+				externalLoadingDetail->Text = text;
+			})));
+		return;
+	}
 	std::ostringstream status;
 	const double copiedGiB = static_cast<double>(bytesCopied) / (1024.0 * 1024.0 * 1024.0);
 	const double totalGiB = static_cast<double>(totalBytes) / (1024.0 * 1024.0 * 1024.0);
 	const double percent = totalBytes ? (100.0 * static_cast<double>(bytesCopied) / static_cast<double>(totalBytes)) : 0.0;
-	status << "Copying title: " << std::fixed << std::setprecision(1) << percent
+	const double displayPercent = (std::max)(0.0, (std::min)(100.0, percent));
+	status << "Loading title: " << std::fixed << std::setprecision(1) << percent
 		<< "% (" << std::setprecision(2) << copiedGiB << " / " << totalGiB << " GiB)";
 	auto text = FromUtf8(status.str());
 	create_task(Dispatcher->RunAsync(CoreDispatcherPriority::Normal,
-		ref new DispatchedHandler([this, text]()
+		ref new DispatchedHandler([this, text, displayPercent]()
 		{
 			launchStatus->Text = text;
+			if (!m_externalLoadingVisible)
+				return;
+			externalLoadingProgress->IsIndeterminate = false;
+			externalLoadingProgress->Value = displayPercent;
+			externalLoadingPercent->Text = FromUtf8(
+				std::to_string(static_cast<unsigned int>(std::lround(displayPercent))) + "%");
+			externalLoadingDetail->Text = text;
 		})));
 }
 

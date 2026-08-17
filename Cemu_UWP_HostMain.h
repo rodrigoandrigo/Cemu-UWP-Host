@@ -24,6 +24,9 @@ namespace Cemu_UWP_Host
 		std::string regionName;
 		std::string localGamePath;
 		std::string localGameFormat;
+		std::string brokeredRelativePath;
+		Windows::Storage::StorageFolder^ brokeredTitleFolder{ nullptr };
+		bool isExternalStorage{};
 	};
 
 	struct ActiveAccount
@@ -50,11 +53,21 @@ namespace Cemu_UWP_Host
 		bool LaunchGame(Windows::Storage::StorageFolder^ gameFolder);
 		bool LaunchGameFile(Windows::Storage::StorageFile^ gameFile);
 		bool LaunchGamePath(const std::string& gamePath);
+		bool LaunchExternalGamePath(const std::string& gamePath,
+			const std::vector<std::string>& supplementalTitlePaths);
+		bool LaunchExternalGameFolders(Windows::Storage::StorageFolder^ selectedFolder,
+			const std::string& selectedRelativePath,
+			const std::vector<Windows::Storage::StorageFolder^>& supplementalFolders);
 		bool InstallTitle(Windows::Storage::StorageFolder^ titleFolder,
 			CemuEmbedInstallType expectedType, uint64_t* installedBaseTitleId = nullptr);
 		std::vector<InstalledTitle> GetInstalledTitles();
 		bool GetActiveAccount(ActiveAccount& account);
 		bool LaunchInstalledTitle(uint64_t baseTitleId);
+		bool DeleteInstalledTitle(uint64_t baseTitleId,
+			uint32_t* removedInstallFolderCount = nullptr);
+		bool DownloadGraphicPacks(uint32_t* downloadedPackCount = nullptr,
+			bool* alreadyCurrent = nullptr);
+		bool ClearShaderCaches(uint32_t* removedEntryCount = nullptr);
 		bool InstallGraphicPacks(Windows::Storage::StorageFolder^ graphicPacksFolder,
 			uint32_t* importedPackCount = nullptr);
 		bool SetGraphicPacksEnabledForTitle(uint64_t baseTitleId, bool enabled,
@@ -86,9 +99,12 @@ namespace Cemu_UWP_Host
 		static void __cdecl StateChanged(void* userData, CemuEmbedState state);
 		static CemuEmbedResult __cdecl EnumerateBrokeredFolder(void* userData, void* folderHandle, CemuEmbedBrokeredEntryCallback entryCallback, void* entryCallbackUserData);
 		static CemuEmbedResult __cdecl OpenBrokeredFile(void* userData, void* fileHandle, void** streamHandle);
+		static CemuEmbedResult __cdecl OpenBrokeredRelativeFile(void* userData, void* folderHandle, const char* relativePath, void** streamHandle);
 		static CemuEmbedResult __cdecl ReadBrokeredStream(void* userData, void* streamHandle, uint64_t offset, uint8_t* buffer, uint32_t bufferSize, uint32_t* bytesRead);
 		static void __cdecl CloseBrokeredStream(void* userData, void* streamHandle);
 		static void __cdecl BrokeredProgress(void* userData, uint64_t bytesCopied, uint64_t totalBytes, const char* relativePath);
+		static CemuEmbedResult __cdecl CopyBrokeredFileToCache(void* userData, void* fileHandle, const char* destinationPathUtf8);
+		static void __cdecl DirectCopyBrokeredProgress(void* userData, uint64_t bytesCopied, uint64_t totalBytes, const char* relativePath);
 		static CemuEmbedResult __cdecl InstalledTitleFound(void* userData,
 			const CemuEmbedInstalledTitle* title);
 		static CemuEmbedResult __cdecl DimensionsFigureFound(void* userData,

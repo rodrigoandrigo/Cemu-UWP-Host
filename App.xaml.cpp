@@ -49,9 +49,8 @@ bool IsXboxDevice()
 App::App()
 {
 	InitializeComponent();
-	// Let Xbox provide its controller-driven system cursor while the XAML UI is
-	// active. The in-game Wii U GamePad virtual mouse remains an independent
-	// input mode and is still toggled by L+R after a title starts.
+	// Keep the platform cursor available for library navigation. DirectXPage
+	// suppresses it only while a title owns the emulator presentation.
 	RequiresPointerMode = ApplicationRequiresPointerMode::Auto;
 	Suspending += ref new SuspendingEventHandler(this, &App::OnSuspending);
 	Resuming += ref new EventHandler<Object^>(this, &App::OnResuming);
