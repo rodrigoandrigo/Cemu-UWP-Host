@@ -108,6 +108,7 @@ namespace Cemu_UWP_Host
 		void SetStateCallback(std::function<void(CemuEmbedState)> callback);
 		void SetProgressCallback(std::function<void(uint64_t, uint64_t, const std::string&)> callback);
 		bool IsReady() const;
+		void ReplaceD3D11Surface(const CemuEmbedD3D11Surface& surface);
 		void ResizeSurface(int width, int height, double dpiScale);
 		void Pump();
 		void Stop();

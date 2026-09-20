@@ -1,0 +1,116 @@
+name: Build
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          path: Cemu-UWP
+
+      - name: Checkout Cemu
+        uses: actions/checkout@v7
+        with:
+          repository: rodrigoandrigo/Cemu
+          ref: build-msvc-d3d11
+          path: Cemu
+          submodules: recursive
+
+      - name: Checkout SDL3 UWP
+        uses: actions/checkout@v7
+        with:
+          repository: rodrigoandrigo/SDL3_UWP
+          path: SDL3-uwp
+
+      - name: Cache vcpkg
+        uses: actions/cache@v6
+        with:
+          path: ~/AppData/Local/vcpkg/archives
+          key: vcpkg-${{ hashFiles('Cemu/cmake/vcpkg-embed/vcpkg.json', 'Cemu/dependencies/vcpkg_overlay_ports*/**') }}
+          restore-keys: |
+            vcpkg-
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+        with:
+          vs-version: '[18.0,19.0)'
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: .\Cemu\dependencies\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Build Cemu
+        shell: pwsh
+        run: |
+          cmake -S .\Cemu -B .\Cemu\build `
+            -G "Visual Studio 18 2026" `
+            -A x64 `
+            -DCEMU_UWP=ON `
+            -DENABLE_D3D11=ON `
+            -DENABLE_D3D12=ON
+          cmake --build .\Cemu\build --config Release --target CemuBin --parallel
+
+      - name: Set package version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
+            throw "Tag must be a numeric version such as v1.0.11 or v1.0.11.0"
+          }
+          if (($version -split '\.').Count -eq 3) { $version += '.0' }
+          $manifest = '.\Cemu-UWP\Package.appxmanifest'
+          (Get-Content $manifest -Raw) -replace 'Version="[^"]+"', "Version=`"$version`"" |
+            Set-Content $manifest -Encoding utf8
+
+      - name: Build package
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:GITHUB_WORKSPACE 'dist\'
+          msbuild .\Cemu-UWP\Cemu-UWP-Host.vcxproj `
+            /restore /m `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            "/p:AppxPackageDir=$packageDir" `
+            /p:UapAppxPackageBuildMode=SideloadOnly `
+            /p:GenerateAppxPackageOnBuild=true `
+            /p:GenerateAppInstallerFile=false
+
+      - name: Stage artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release | Out-Null
+
+          $bundle = Get-ChildItem .\dist -Recurse -File |
+            Where-Object { $_.Extension -in '.appxbundle', '.msixbundle' } |
+            Select-Object -First 1
+          if (-not $bundle) { throw 'No app bundle was produced.' }
+
+          $vclibs = Get-ChildItem .\dist -Recurse -File -Filter 'Microsoft.VCLibs.x64.14.00.appx' |
+            Select-Object -First 1
+          if (-not $vclibs) { throw 'Microsoft.VCLibs.x64.14.00.appx was not produced.' }
+
+          Copy-Item $bundle.FullName .\release\
+          Copy-Item $vclibs.FullName .\release\
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Cemu-UWP
+          path: release/*
+          if-no-files-found: error
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: release/*
