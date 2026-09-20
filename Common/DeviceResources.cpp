@@ -545,6 +545,11 @@ void DX::DeviceResources::SetSwapChainPanel(SwapChainPanel^ panel)
 	CreateWindowSizeDependentResources();
 }
 
+void DX::DeviceResources::DetachSwapChainPanel()
+{
+	m_swapChainPanel = nullptr;
+}
+
 void DX::DeviceResources::ReleaseSizeDependentResourcesForExternalRenderer()
 {
 	// The embedded Cemu renderer owns presentation and ResizeBuffers after the
